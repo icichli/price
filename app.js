@@ -313,14 +313,17 @@
     updateRollbackButtonState();
 
     if (state.parsedItems.length > 0) {
+      // Есть выбранный пользователем свежий файл
       recomputeDiff();
       renderTable();
     } else if (snap.current && snap.current.length > 0) {
-      // Если файл еще не загружен, но есть сохраненная база — отобразим ее
-      displayBaselineAsCurrent();
+      // Вариант 1: Показываем изменения последнего принятого прихода (current vs previous)
+      recomputeDiff();
+      renderTable();
     } else {
       state.diffItems = [];
       updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
+      dom.fileCard.classList.remove('visible');
       renderTable();
     }
   }
@@ -493,8 +496,10 @@
 
       dom.fileCard.classList.add('visible');
       dom.loadedFileName.textContent = file.name;
+      dom.btnChangeFile.querySelector('span').textContent = 'Сменить файл';
       dom.btnOpenMapping.disabled = false;
       dom.btnCommitSnapshot.disabled = false;
+      dom.btnCommitSnapshot.title = 'Зафиксировать текущий прайс как эталон в IndexedDB и отправить в Google Таблицу';
 
     } catch (err) {
       console.error('File parsing error:', err);
@@ -563,20 +568,45 @@
     state.currentSheetName = '';
     state.currentSheetData = [];
     state.parsedItems = [];
-    state.diffItems = [];
-
-    dom.fileCard.classList.remove('visible');
     dom.fileInput.value = '';
-    dom.btnOpenMapping.disabled = true;
     dom.btnCommitSnapshot.disabled = true;
+
+    // Вариант 1: возвращаемся к показу зафиксированного последнего прихода
+    recomputeDiff();
+    renderTable();
   }
 
   // ==========================================================================
   // DIFF ENGINE (СРАВНЕНИЕ ОСТАТКОВ И КЛАССИФИКАЦИЯ)
   // ==========================================================================
   function recomputeDiff() {
-    const currentList = state.parsedItems;
-    const baselineList = state.baselineSnapshot.current || [];
+    let currentList = [];
+    let baselineList = [];
+    let isShowingCommittedShipment = false;
+
+    if (state.parsedItems.length > 0) {
+      // Режим 1: Сравнение выбранного свежего файла с текущей базой
+      currentList = state.parsedItems;
+      baselineList = state.baselineSnapshot.current || [];
+      isShowingCommittedShipment = false;
+    } else if (state.baselineSnapshot.current && state.baselineSnapshot.current.length > 0) {
+      // Режим 2 (Вариант 1): Показ изменений последнего принятого прихода (current vs previous)
+      currentList = state.baselineSnapshot.current;
+      baselineList = state.baselineSnapshot.previous || [];
+      isShowingCommittedShipment = true;
+    } else {
+      state.diffItems = [];
+      updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
+      dom.fileCard.classList.remove('visible');
+      return;
+    }
+
+    // Если это самый первый снимок в истории (previous отсутствует)
+    if (isShowingCommittedShipment && baselineList.length === 0) {
+      displayBaselineAsCurrent();
+      updateCommittedShipmentCard(currentList.length);
+      return;
+    }
 
     // 1. Проверяем, есть ли артикулы в обоих наборах данных
     const hasBaselineCode = baselineList.some(i => i.code && i.code.trim().length > 0);
@@ -608,7 +638,7 @@
     let dropCount = 0;
     let outCount = 0;
 
-    // 2. Обрабатываем позиции из свежего файла
+    // 2. Обрабатываем позиции из текущего списка (свежего или последнего прихода)
     for (const curr of currentList) {
       const key = getItemKey(curr);
       const prev = prevMap.get(key);
@@ -677,7 +707,7 @@
       });
     }
 
-    // 3. Обрабатываем позиции, которые БЫЛИ в базе с остатком > 0, но ИСЧЕЗЛИ из нового файла
+    // 3. Обрабатываем позиции, которые БЫЛИ в базе с остатком > 0, но ИСЧЕЗЛИ
     for (const [key, prev] of prevMap.entries()) {
       if (!seenPrevKeys.has(key) && prev.stock > 0) {
         diffResults.push({
@@ -709,6 +739,34 @@
     };
 
     updateBadges(state.diffStats);
+
+    if (isShowingCommittedShipment) {
+      updateCommittedShipmentCard(currentList.length);
+    }
+  }
+
+  function updateCommittedShipmentCard(itemCount) {
+    dom.fileCard.classList.add('visible');
+
+    const activeSup = state.suppliers.find(s => s.id === state.activeSupplierId);
+    const lastFileName = (activeSup && activeSup.mapping && activeSup.mapping.lastFileName)
+      ? activeSup.mapping.lastFileName
+      : (state.currentFileName || 'Последний принятый приход');
+
+    dom.loadedFileName.textContent = lastFileName;
+    dom.loadedFileStats.textContent = `Приход: ${itemCount} поз. (в облаке)`;
+
+    const dateStr = state.baselineSnapshot.updatedAt
+      ? new Date(state.baselineSnapshot.updatedAt).toLocaleString('ru-RU')
+      : '';
+    dom.loadedFileBaseline.textContent = dateStr ? `Зафиксировано: ${dateStr}` : 'В облачной базе';
+
+    dom.btnCommitSnapshot.disabled = true;
+    dom.btnCommitSnapshot.title = 'Текущий приход уже зафиксирован в базе. Выберите свежий файл для следующего прихода';
+    if (dom.btnChangeFile.querySelector('span')) {
+      dom.btnChangeFile.querySelector('span').textContent = 'Загрузить свежий приход';
+    }
+    dom.btnOpenMapping.disabled = false;
   }
 
   function updateBadges(stats) {
@@ -886,13 +944,19 @@
 
     try {
       dom.btnCommitSnapshot.disabled = true;
-      showToast('Сохранение новой базы в IndexedDB...', 'info');
+      showToast('Сохранение новой базы в IndexedDB и Google Sheets...', 'info');
+
+      // Сохраняем имя файла в объекте маппинга для синхронизации в облако
+      const mapping = state.currentMapping ? { ...state.currentMapping } : {};
+      mapping.lastFileName = state.currentFileName || 'price.xlsx';
+      mapping.lastCommitTime = new Date().toISOString();
+      state.currentMapping = mapping;
 
       // 1. Локальное сохранение
       const updatedRecord = await window.PriceStorage.commitNewSnapshot(
         state.activeSupplierId,
         state.parsedItems,
-        state.currentMapping
+        mapping
       );
 
       state.baselineSnapshot = updatedRecord;
@@ -903,7 +967,7 @@
       const cloudRes = await window.PriceStorage.syncSnapshotToCloud(
         state.activeSupplierId,
         supName,
-        state.currentMapping,
+        mapping,
         state.parsedItems
       );
 
@@ -913,13 +977,19 @@
         showToast('База сохранена локально (офлайн)', 'success');
       }
 
-      // Пересчитываем diff относительно новой базы
+      // Вариант 1: очищаем буфер свежего файла, переключая систему
+      // на отображение изменений принятого прихода (current vs previous)
+      state.parsedItems = [];
+      state.currentWorkbook = null;
+      state.currentSheetData = [];
+      dom.fileInput.value = '';
+
+      // Пересчитываем diff: теперь он показывает разницу между только что принятым приходом и previous!
       recomputeDiff();
       renderTable();
 
     } catch (err) {
       showToast('Ошибка при фиксации базы: ' + err.message, 'error');
-    } finally {
       dom.btnCommitSnapshot.disabled = false;
     }
   }
