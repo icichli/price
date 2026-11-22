@@ -290,15 +290,18 @@ body {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden !important;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE / Edge */
+  scrollbar-width: none;
+  /* Firefox */
+  -ms-overflow-style: none;
+  /* IE / Edge */
   -webkit-overflow-scrolling: touch;
   margin-bottom: -2px;
   padding-top: 4px;
 }
 
 .suppliers-tabs::-webkit-scrollbar {
-  display: none !important; /* Chrome, Edge, Safari */
+  display: none !important;
+  /* Chrome, Edge, Safari */
   width: 0 !important;
   height: 0 !important;
 }
@@ -792,7 +795,8 @@ body {
   justify-content: center;
   gap: 6px;
   min-height: 36px;
-  min-width: 54px; /* Удобный размер для тапа / клика даже для коротких названий ("+", "-") */
+  min-width: 54px;
+  /* Удобный размер для тапа / клика даже для коротких названий ("+", "-") */
   padding: 7px 14px;
   border-radius: var(--radius-full);
   background: var(--bg-secondary);

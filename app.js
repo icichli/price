@@ -12,7 +12,7 @@
   const state = {
     suppliers: [],
     activeSupplierId: null,
-    
+
     // Текущий загруженный файл и распарсенные данные
     currentWorkbook: null,
     currentFileName: '',
@@ -183,11 +183,11 @@
     try {
       // 1. Инициализируем локальную БД IndexedDB
       await window.PriceStorage.init();
-      
+
       // 2. Загружаем поставщиков
       state.suppliers = await window.PriceStorage.getAllSuppliers();
       const savedActiveId = window.PriceStorage.getActiveSupplierId();
-      
+
       if (state.suppliers.some(s => s.id === savedActiveId)) {
         state.activeSupplierId = savedActiveId;
       } else if (state.suppliers.length > 0) {
@@ -293,7 +293,7 @@
           isLongPress = true;
           tab.classList.remove('holding');
           if (navigator.vibrate) {
-            try { navigator.vibrate(40); } catch (_) {}
+            try { navigator.vibrate(40); } catch (_) { }
           }
           openEditSupplierModal(sup);
         }, 500);
@@ -474,7 +474,7 @@
   function updateBaselineInfo() {
     const sup = state.suppliers.find(s => s.id === state.activeSupplierId);
     const hasData = Boolean(state.baselineSnapshot && state.baselineSnapshot.current && state.baselineSnapshot.current.length > 0);
-    
+
     let dateStr = 'нет данных';
     if (state.baselineSnapshot && state.baselineSnapshot.updatedAt) {
       try {
@@ -482,12 +482,12 @@
         if (!isNaN(d.getTime())) {
           dateStr = d.toLocaleString('ru-RU');
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     const count = hasData ? state.baselineSnapshot.current.length : 0;
     const infoText = hasData ? `База: ${count} поз. (от ${dateStr})` : 'База: пустая (нет данных)';
-    
+
     dom.loadedFileBaseline.textContent = infoText;
     dom.footerBaselineInfo.textContent = `Эталон: ${sup ? sup.name : ''} | ${infoText}`;
   }
@@ -901,7 +901,7 @@
         if (!isNaN(d.getTime())) {
           dateStr = d.toLocaleString('ru-RU');
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     dom.loadedFileBaseline.textContent = dateStr ? `Зафиксировано: ${dateStr}` : 'В облачной базе';
 
@@ -1701,7 +1701,7 @@
   function onSheetChange() {
     state.currentSheetName = dom.sheetSelector.value;
     state.currentSheetData = window.ExcelParser.getSheetData(state.currentWorkbook, state.currentSheetName);
-    
+
     // Переопределяем заголовок для нового листа
     const headerDetection = window.ExcelParser.detectHeaderRow(state.currentSheetData);
     state.currentHeaderRowIndex = headerDetection.rowIndex;
