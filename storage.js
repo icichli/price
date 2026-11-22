@@ -141,7 +141,12 @@ class StorageManager {
       const store = tx.objectStore('snapshots');
       const req = store.get(supplierId);
 
-      req.onsuccess = () => resolve(req.result || { supplierId, current: [], previous: [], updatedAt: '' });
+      req.onsuccess = () => {
+        const res = req.result || { supplierId, current: [], previous: [], updatedAt: '' };
+        res.current = this._decompactSnapshot(res.current || []);
+        res.previous = this._decompactSnapshot(res.previous || []);
+        resolve(res);
+      };
       req.onerror = () => reject(req.error);
     });
   }
@@ -164,9 +169,11 @@ class StorageManager {
     const existing = await this.getSnapshotRecord(supplierId);
     const nowIso = new Date().toISOString();
 
+    const sanitizedItems = this._sanitizeSnapshotItems(newSnapshotItems);
+
     const updatedRecord = {
       supplierId: supplierId,
-      current: newSnapshotItems,
+      current: sanitizedItems,
       previous: (existing.current && existing.current.length > 0) ? existing.current : (existing.previous || []),
       updatedAt: nowIso
     };
@@ -442,11 +449,14 @@ class StorageManager {
             updatedAt: remote.updatedAt
           });
 
-          // Сохраняем снимок
+          // Сохраняем снимок с декомпактизацией
+          const currentDecompacted = this._decompactSnapshot(remote.currentSnapshot || []);
+          const previousDecompacted = this._decompactSnapshot(remote.previousSnapshot || []);
+
           await this.saveSnapshotRecord({
             supplierId: remote.id,
-            current: remote.currentSnapshot || [],
-            previous: remote.previousSnapshot || [],
+            current: currentDecompacted,
+            previous: previousDecompacted,
             updatedAt: remote.updatedAt
           });
         }
@@ -472,6 +482,10 @@ class StorageManager {
     try {
       this._notifyStatus('syncing', 'Отправка в Google Таблицу...');
 
+      // Компактная сериализация для гарантированного прохождения лимита ячеек Google Sheets (50 000 символов)
+      const sanitized = this._sanitizeSnapshotItems(snapshot);
+      const compactSnapshot = this._compactSnapshot(sanitized);
+
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -483,7 +497,7 @@ class StorageManager {
           supplierId,
           supplierName,
           mapping,
-          snapshot
+          snapshot: compactSnapshot
         })
       });
 
@@ -634,6 +648,74 @@ class StorageManager {
       console.warn('Cloud supplier management failed:', err);
       return null;
     }
+  }
+
+  // ==========================================
+  // СЖАТИЕ И СЕРИАЛИЗАЦИЯ СНИМКОВ ОСТАТКОВ
+  // ==========================================
+
+  _sanitizeSnapshotItems(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map(item => {
+      const clean = {
+        name: String(item.name || '').trim(),
+        stock: typeof item.stock === 'number' ? item.stock : (parseFloat(item.stock) || 0)
+      };
+      if (item.code && String(item.code).trim()) {
+        clean.code = String(item.code).trim();
+      }
+      if (item.price !== null && item.price !== undefined && item.price !== '') {
+        clean.price = typeof item.price === 'number' ? item.price : parseFloat(item.price);
+      }
+      if (item.isTextStock) {
+        clean.isTextStock = true;
+      }
+      if (item.textStockNote) {
+        clean.textStockNote = String(item.textStockNote).trim();
+      }
+      return clean;
+    });
+  }
+
+  _compactSnapshot(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map(i => {
+      // 1. Простейший кортеж: [name, stock]
+      if (!i.code && (i.price === null || i.price === undefined) && !i.isTextStock) {
+        return [i.name, i.stock];
+      }
+      // 2. Кортеж с доп. полями: [name, stock, code, price, isTextStock, textStockNote]
+      const arr = [i.name, i.stock, i.code || '', i.price !== null && i.price !== undefined ? i.price : null];
+      if (i.isTextStock) {
+        arr.push(1);
+        arr.push(i.textStockNote || '');
+      }
+      return arr;
+    });
+  }
+
+  _decompactSnapshot(items) {
+    if (!Array.isArray(items)) return [];
+    return items.map(i => {
+      if (Array.isArray(i)) {
+        return {
+          name: i[0] || '',
+          stock: typeof i[1] === 'number' ? i[1] : (parseFloat(i[1]) || 0),
+          code: i[2] || '',
+          price: i[3] !== undefined && i[3] !== null ? (typeof i[3] === 'number' ? i[3] : parseFloat(i[3])) : null,
+          isTextStock: i[4] === 1,
+          textStockNote: i[5] || ''
+        };
+      }
+      return {
+        name: i.name || '',
+        stock: typeof i.stock === 'number' ? i.stock : (parseFloat(i.stock) || 0),
+        code: i.code || '',
+        price: i.price !== undefined && i.price !== null ? (typeof i.price === 'number' ? i.price : parseFloat(i.price)) : null,
+        isTextStock: Boolean(i.isTextStock),
+        textStockNote: i.textStockNote || ''
+      };
+    });
   }
 }
 

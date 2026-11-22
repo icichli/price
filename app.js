@@ -610,13 +610,6 @@
       return;
     }
 
-    // Если это самый первый снимок в истории (previous отсутствует)
-    if (isShowingCommittedShipment && baselineList.length === 0) {
-      displayBaselineAsCurrent();
-      updateCommittedShipmentCard(currentList.length);
-      return;
-    }
-
     // 1. Проверяем, есть ли артикулы в обоих наборах данных
     const hasBaselineCode = baselineList.some(i => i.code && i.code.trim().length > 0);
     const hasCurrentCode = currentList.some(i => i.code && i.code.trim().length > 0);
@@ -973,17 +966,22 @@
       updateRollbackButtonState();
 
       // 2. Облачная отправка (POST)
-      const cloudRes = await window.PriceStorage.syncSnapshotToCloud(
-        state.activeSupplierId,
-        supName,
-        mapping,
-        state.parsedItems
-      );
+      let cloudSuccess = false;
+      try {
+        const cloudRes = await window.PriceStorage.syncSnapshotToCloud(
+          state.activeSupplierId,
+          supName,
+          mapping,
+          state.baselineSnapshot.current
+        );
+        if (cloudRes) cloudSuccess = true;
+      } catch (cloudErr) {
+        console.warn('Cloud sync error on commit:', cloudErr);
+        showToast('База зафиксирована локально (ошибка облака: ' + cloudErr.message + ')', 'warning');
+      }
 
-      if (cloudRes) {
+      if (cloudSuccess) {
         showToast('База успешно зафиксирована и отправлена в Google Sheets!', 'success');
-      } else {
-        showToast('База сохранена локально (офлайн)', 'success');
       }
 
       // Вариант 1: очищаем буфер свежего файла, переключая систему

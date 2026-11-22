@@ -93,6 +93,42 @@ function createJsonResponse(data) {
 }
 
 /**
+ * Безопасная запись длинных строк JSON в ячейки с обходом лимита 50 000 символов
+ */
+function setCellSafe(sheet, row, col, str) {
+  if (!str) {
+    sheet.getRange(row, col).setValue('');
+    return;
+  }
+  if (str.length <= 49000) {
+    sheet.getRange(row, col).setValue(str);
+    const overflowCol = col + 2;
+    if (overflowCol <= sheet.getMaxColumns()) {
+      sheet.getRange(row, overflowCol).setValue('');
+    }
+  } else {
+    const chunk1 = str.substring(0, 48000);
+    const chunk2 = str.substring(48000);
+    sheet.getRange(row, col).setValue('CHUNK::' + chunk1);
+    const overflowCol = col + 2;
+    if (overflowCol > sheet.getMaxColumns()) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), overflowCol - sheet.getMaxColumns() + 2);
+    }
+    sheet.getRange(row, overflowCol).setValue(chunk2);
+  }
+}
+
+function getCellSafe(row, colZeroBased) {
+  const val = row[colZeroBased] ? String(row[colZeroBased]) : '';
+  if (val.startsWith('CHUNK::')) {
+    const part1 = val.substring(7);
+    const part2 = row[colZeroBased + 2] ? String(row[colZeroBased + 2]) : '';
+    return part1 + part2;
+  }
+  return val;
+}
+
+/**
  * Обработчик GET-запросов (чтение базы)
  * URL: https://script.google.com/macros/s/.../exec?token=YOUR_TOKEN
  */
@@ -128,9 +164,12 @@ function doGet(e) {
       let currentSnapshot = [];
       let previousSnapshot = [];
       
+      const currentJson = getCellSafe(row, 4);
+      const previousJson = getCellSafe(row, 5);
+      
       try { mapping = row[3] ? JSON.parse(row[3]) : null; } catch(err) {}
-      try { currentSnapshot = row[4] ? JSON.parse(row[4]) : []; } catch(err) {}
-      try { previousSnapshot = row[5] ? JSON.parse(row[5]) : []; } catch(err) {}
+      try { currentSnapshot = currentJson ? JSON.parse(currentJson) : []; } catch(err) {}
+      try { previousSnapshot = previousJson ? JSON.parse(previousJson) : []; } catch(err) {}
       
       suppliers.push({
         id: String(supplierId),
@@ -207,7 +246,7 @@ function doPost(e) {
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][0]) === supplierId) {
           targetRowIndex = i + 1; // в Sheets строки с 1
-          existingCurrentJson = data[i][4] || '[]';
+          existingCurrentJson = getCellSafe(data[i], 4) || '[]';
           break;
         }
       }
@@ -222,8 +261,8 @@ function doPost(e) {
         if (mappingJson) {
           sheet.getRange(targetRowIndex, 4).setValue(mappingJson);
         }
-        sheet.getRange(targetRowIndex, 5).setValue(newSnapshotJson);
-        sheet.getRange(targetRowIndex, 6).setValue(existingCurrentJson);
+        setCellSafe(sheet, targetRowIndex, 5, newSnapshotJson);
+        setCellSafe(sheet, targetRowIndex, 6, existingCurrentJson);
       } else {
         // Новый поставщик
         sheet.appendRow([
@@ -231,9 +270,11 @@ function doPost(e) {
           supplierName,
           nowIso,
           mappingJson,
-          newSnapshotJson,
+          '',
           '[]'
         ]);
+        const newRowIndex = sheet.getLastRow();
+        setCellSafe(sheet, newRowIndex, 5, newSnapshotJson);
       }
       
       return createJsonResponse({
@@ -256,7 +297,7 @@ function doPost(e) {
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][0]) === supplierId) {
           targetRowIndex = i + 1;
-          previousSnapshotJson = data[i][5] || '';
+          previousSnapshotJson = getCellSafe(data[i], 5) || '';
           break;
         }
       }
@@ -272,8 +313,8 @@ function doPost(e) {
       const nowIso = new Date().toISOString();
       // Восстанавливаем PreviousSnapshot в CurrentSnapshot
       sheet.getRange(targetRowIndex, 3).setValue(nowIso);
-      sheet.getRange(targetRowIndex, 5).setValue(previousSnapshotJson);
-      sheet.getRange(targetRowIndex, 6).setValue(''); // очищаем previous после отката
+      setCellSafe(sheet, targetRowIndex, 5, previousSnapshotJson);
+      setCellSafe(sheet, targetRowIndex, 6, ''); // очищаем previous после отката
       
       let restoredData = [];
       try { restoredData = JSON.parse(previousSnapshotJson); } catch (e) {}
@@ -303,8 +344,8 @@ function doPost(e) {
       
       if (targetRowIndex > 0) {
         sheet.getRange(targetRowIndex, 3).setValue('');
-        sheet.getRange(targetRowIndex, 5).setValue('[]');
-        sheet.getRange(targetRowIndex, 6).setValue('[]');
+        setCellSafe(sheet, targetRowIndex, 5, '[]');
+        setCellSafe(sheet, targetRowIndex, 6, '[]');
         
         // Очищаем lastFileName в MappingJSON, если он был сохранен
         let mapping = null;
