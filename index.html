@@ -3,10 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ПрайсКонтроль — быстрый веб-инструмент для сравнения остатков и цен поставщиков в Excel (.xlsx, .xls) с локальным хранением в IndexedDB и облачной синхронизацией.">
+  <meta name="theme-color" content="#2563eb">
   <title>ПрайсКонтроль — Сравнение остатков и прайсов</title>
+
+  <!-- Оптимизация сетевых запросов: предварительное подключение к CDN -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
+  <!-- Фавиконка (SVG Data URI без дополнительных сетевых обращений) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><line x1='18' y1='20' x2='18' y2='10'></line><line x1='12' y1='20' x2='12' y2='4'></line><line x1='6' y1='20' x2='6' y2='14'></line></svg>">
+
   <link rel="stylesheet" href="style.css">
-  <!-- SheetJS CDN для чтения и экспорта Excel файлов (.xlsx, .xls) -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- SheetJS CDN: defer предотвращает блокировку первичной отрисовки DOM -->
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <div class="app-wrapper">
@@ -434,9 +444,9 @@
   <!-- КОНТЕЙНЕР ДЛЯ ВСПЛЫВАЮЩИХ УВЕДОМЛЕНИЙ (TOAST) -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <!-- СКРИПТЫ ПРИЛОЖЕНИЯ -->
-  <script src="storage.js"></script>
-  <script src="parser.js"></script>
-  <script src="app.js"></script>
+  <!-- СКРИПТЫ ПРИЛОЖЕНИЯ (defer для параллельной загрузки без задержки рендера) -->
+  <script defer src="storage.js"></script>
+  <script defer src="parser.js"></script>
+  <script defer src="app.js"></script>
 </body>
 </html>
