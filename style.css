@@ -1033,6 +1033,12 @@ body {
   color: #059669;
 }
 
+.package-badge.package-other {
+  background: rgba(100, 116, 139, 0.12);
+  border: 1px solid rgba(100, 116, 139, 0.35);
+  color: #64748b;
+}
+
 [data-theme="dark"] .package-badge.package-draft {
   background: rgba(245, 158, 11, 0.22);
   border-color: rgba(245, 158, 11, 0.45);
@@ -1049,6 +1055,12 @@ body {
   background: rgba(16, 185, 129, 0.22);
   border-color: rgba(16, 185, 129, 0.45);
   color: #6ee7b7;
+}
+
+[data-theme="dark"] .package-badge.package-other {
+  background: rgba(148, 163, 184, 0.22);
+  border-color: rgba(148, 163, 184, 0.45);
+  color: #cbd5e1;
 }
 
 .cell-code {

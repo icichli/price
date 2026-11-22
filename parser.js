@@ -358,7 +358,7 @@ class ExcelParser {
     const bEnd = '(?=[\\s,.;:()/\\[\\]_—–-]|$|[^a-zA-Zа-яА-ЯёЁ0-9])';
 
     // 1. Маркеры кегов и разливного
-    const isExplicitKeg = /(?:кег|кэг|\bkegs?\b|пэт-?к[еэ]г|бочк|бочон|фитинг|фит[.\s_-]*[asgmdа-я]|ф[.\s_-]*[asgmdа-я])/i.test(name) ||
+    const isExplicitKeg = /(?:кег|кэг|\bkegs?\b|пэт-?к[еэ]г|бочк|бочон|фитинг|(?:^|[\s_/-])фит[.\s_-]+[asgmdабсгм](?:$|[\s_/-]))/i.test(name) ||
                           unit.includes('кег');
     const isDraftWord = /(?:разлив|на разлив|\bдал\b)/i.test(name) || /(?:^|[\s_/-])дал(?:$|[\s_/-])/i.test(name);
     const hasKegVol = new RegExp(
@@ -387,8 +387,8 @@ class ExcelParser {
     ).test(name);
 
     // ПРИОРИТЕТ 1: Явное разливное (кег, фитинг, разлив, дал, 30л, 50л, 20л)
-    // Если есть маркер кега/разлива ИЛИ объем кега (при отсутствии явного "бут/жб")
-    if (isExplicitKeg || isDraftWord || (hasKegVol && !isExplicitBottle && !isExplicitCan)) {
+    // Если есть маркер кега/разлива ИЛИ объем кега (при отсутствии явного "бут/жб" и малого объема)
+    if (isExplicitKeg || isDraftWord || (hasKegVol && !isExplicitBottle && !isExplicitCan && !hasSmallVol)) {
       return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
     }
 
@@ -411,14 +411,15 @@ class ExcelParser {
     }
 
     // ПРИОРИТЕТ 4: Единицы измерения
-    if (hasKegUnit || unit === 'л' || unit === 'литр') {
+    if (hasKegUnit) {
       return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
     }
-    if (unit === 'бут' || unit === 'бан' || unit === 'шт') {
+    if (unit === 'бут' || unit === 'бан') {
       return { type: 'bottle', subType: 'bottle', label: 'Бутылочное', icon: '🍾' };
     }
 
-    return { type: 'other', subType: 'other', label: 'Прочее', icon: '📦' };
+    // По умолчанию для всех остальных позиций (снеки, вода, фасовка, штучный товар)
+    return { type: 'bottle', subType: 'other', label: 'Фасовка', icon: '📦' };
   }
 
   /**

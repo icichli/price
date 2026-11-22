@@ -831,7 +831,7 @@
     for (const item of baseItems) {
       if (item.packageType === 'draft') {
         draftCount++;
-      } else if (item.packageType === 'bottle') {
+      } else {
         bottleCount++;
       }
     }
@@ -868,8 +868,10 @@
     }
 
     // 1.1. Фильтрация по таре (Разливное / Бутылочное)
-    if (state.subFilter !== 'all') {
-      items = items.filter(i => i.packageType === state.subFilter);
+    if (state.subFilter === 'draft') {
+      items = items.filter(i => i.packageType === 'draft');
+    } else if (state.subFilter === 'bottle') {
+      items = items.filter(i => i.packageType !== 'draft');
     }
 
     // 2. Поиск по строке (наименование или артикул)
@@ -934,12 +936,12 @@
       let pkgBadge = '';
       if (item.packageType === 'draft') {
         pkgBadge = `<span class="package-badge package-draft" title="Разливное пиво (кег)">🍺 Разлив</span>`;
-      } else if (item.packageType === 'bottle') {
-        if (item.packageSubType === 'can') {
-          pkgBadge = `<span class="package-badge package-can" title="Банка (ж/б)">🥫 Банка</span>`;
-        } else {
-          pkgBadge = `<span class="package-badge package-bottle" title="Бутылочное / стекло">🍾 Бутылка</span>`;
-        }
+      } else if (item.packageSubType === 'can') {
+        pkgBadge = `<span class="package-badge package-can" title="Банка (ж/б)">🥫 Банка</span>`;
+      } else if (item.packageSubType === 'bottle') {
+        pkgBadge = `<span class="package-badge package-bottle" title="Бутылочное / стекло">🍾 Бутылка</span>`;
+      } else if (item.packageSubType === 'other' && item.packageLabel) {
+        pkgBadge = `<span class="package-badge package-other" title="Фасованный товар">${item.packageIcon || '📦'} ${item.packageLabel}</span>`;
       }
 
       tdName.innerHTML = `
@@ -1170,8 +1172,10 @@
       items = items.filter(i => i.status === state.activeFilter);
     }
 
-    if (state.subFilter && state.subFilter !== 'all') {
-      items = items.filter(i => i.packageType === state.subFilter);
+    if (state.subFilter === 'draft') {
+      items = items.filter(i => i.packageType === 'draft');
+    } else if (state.subFilter === 'bottle') {
+      items = items.filter(i => i.packageType !== 'draft');
     }
 
     if (state.searchQuery) {
