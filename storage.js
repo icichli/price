@@ -10,6 +10,8 @@ class StorageManager {
     this.syncListeners = [];
     this.syncStatus = 'offline'; // 'synced' | 'syncing' | 'offline' | 'error' | 'unconfigured'
     this.lastSyncMessage = '';
+    // Предустановленный URL Google Apps Script для автоматического подключения
+    this.DEFAULT_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzbltwk1a7gvStn-K0F82UVn3kqtnJzYSQOhZSVyPIen8Mtap0_QYkfMZGzLLmFpuUGrA/exec';
   }
 
   /**
@@ -48,14 +50,14 @@ class StorageManager {
   }
 
   /**
-   * Создание 2 поставщиков по умолчанию, если база пустая
+   * Создание поставщиков «ПП» и «Бир и Ко» по умолчанию
    */
   async _seedDefaultSuppliers() {
     const suppliers = await this.getAllSuppliers();
     if (!suppliers || suppliers.length === 0) {
       const defaultSuppliers = [
-        { id: 'supplier_1', name: 'Поставщик 1', order: 0, mapping: null, updatedAt: new Date().toISOString() },
-        { id: 'supplier_2', name: 'Поставщик 2', order: 1, mapping: null, updatedAt: new Date().toISOString() }
+        { id: 'supplier_1', name: 'ПП', order: 0, mapping: null, updatedAt: new Date().toISOString() },
+        { id: 'supplier_2', name: 'Бир и Ко', order: 1, mapping: null, updatedAt: new Date().toISOString() }
       ];
 
       for (const sup of defaultSuppliers) {
@@ -66,6 +68,17 @@ class StorageManager {
           previous: [],
           updatedAt: sup.updatedAt
         });
+      }
+    } else {
+      // Автоматическое переименование дефолтных поставщиков, если они назывались «Поставщик 1» / «Поставщик 2»
+      for (const sup of suppliers) {
+        if (sup.id === 'supplier_1' && (sup.name === 'Поставщик 1' || sup.name === 'Поставщик')) {
+          sup.name = 'ПП';
+          await this.saveSupplier(sup);
+        } else if (sup.id === 'supplier_2' && (sup.name === 'Поставщик 2')) {
+          sup.name = 'Бир и Ко';
+          await this.saveSupplier(sup);
+        }
       }
     }
   }
@@ -204,15 +217,51 @@ class StorageManager {
   // ==========================================
 
   getCloudConfig() {
+    const savedUrl = localStorage.getItem('price_gas_url');
     return {
-      url: localStorage.getItem('price_gas_url') || '',
-      token: localStorage.getItem('price_gas_token') || ''
+      url: (savedUrl && savedUrl.trim()) ? savedUrl.trim() : this.DEFAULT_CLOUD_URL,
+      token: localStorage.getItem('price_gas_token') || sessionStorage.getItem('price_gas_token') || ''
     };
   }
 
-  setCloudConfig(url, token) {
-    localStorage.setItem('price_gas_url', (url || '').trim());
-    localStorage.setItem('price_gas_token', (token || '').trim());
+  setCloudConfig(url, token, remember = true) {
+    const cleanUrl = (url || this.DEFAULT_CLOUD_URL).trim();
+    const cleanToken = (token || '').trim();
+
+    localStorage.setItem('price_gas_url', cleanUrl);
+
+    if (remember) {
+      if (cleanToken) {
+        localStorage.setItem('price_gas_token', cleanToken);
+      } else {
+        localStorage.removeItem('price_gas_token');
+      }
+      localStorage.setItem('price_remember_pin', 'true');
+    } else {
+      localStorage.removeItem('price_gas_token');
+      localStorage.setItem('price_remember_pin', 'false');
+    }
+
+    if (cleanToken) {
+      sessionStorage.setItem('price_gas_token', cleanToken);
+      sessionStorage.setItem('price_session_auth', 'true');
+    } else {
+      sessionStorage.removeItem('price_gas_token');
+      sessionStorage.removeItem('price_session_auth');
+    }
+
+    this._evaluateCloudStatus();
+  }
+
+  hasAuthenticatedPin() {
+    const token = localStorage.getItem('price_gas_token') || sessionStorage.getItem('price_gas_token');
+    return Boolean(token && token.trim().length > 0);
+  }
+
+  clearCloudAuth() {
+    localStorage.removeItem('price_gas_token');
+    sessionStorage.removeItem('price_gas_token');
+    sessionStorage.removeItem('price_session_auth');
     this._evaluateCloudStatus();
   }
 
@@ -267,8 +316,8 @@ class StorageManager {
 
   _evaluateCloudStatus() {
     const { url, token } = this.getCloudConfig();
-    if (!url || !token) {
-      this._notifyStatus('unconfigured', 'Облако не настроено');
+    if (!token) {
+      this._notifyStatus('unconfigured', 'Требуется ввод PIN');
     } else if (!navigator.onLine) {
       this._notifyStatus('offline', 'Нет интернета');
     } else {

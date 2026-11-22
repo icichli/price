@@ -52,10 +52,6 @@
       lowQty: 5
     },
 
-    // Порционный рендеринг таблицы (для мгновенной загрузки больших файлов)
-    filteredItems: [],
-    renderedRowsCount: 0,
-
     // Текущий режим редактирования поставщика
     supplierModalMode: 'add', // 'add' | 'edit'
     supplierModalTargetId: null
@@ -110,7 +106,6 @@
     btnExportClipboard: document.getElementById('btnExportClipboard'),
 
     // Таблица
-    tableWrapper: document.querySelector('.table-wrapper'),
     tableBody: document.getElementById('tableBody'),
     tableEmptyState: document.getElementById('tableEmptyState'),
     tableHeaders: document.querySelectorAll('.data-table th.sortable'),
@@ -125,6 +120,17 @@
     btnTestCloudConnection: document.getElementById('btnTestCloudConnection'),
     btnSyncCloudNow: document.getElementById('btnSyncCloudNow'),
     btnSaveCloudSettings: document.getElementById('btnSaveCloudSettings'),
+    btnClearPin: document.getElementById('btnClearPin'),
+
+    // Модалка ввода PIN при входе
+    modalPinPrompt: document.getElementById('modalPinPrompt'),
+    sitePinInput: document.getElementById('sitePinInput'),
+    btnTogglePinVisibility: document.getElementById('btnTogglePinVisibility'),
+    rememberPinCheckbox: document.getElementById('rememberPinCheckbox'),
+    pinPromptError: document.getElementById('pinPromptError'),
+    btnSubmitPin: document.getElementById('btnSubmitPin'),
+    btnSubmitPinText: document.getElementById('btnSubmitPinText'),
+    btnSkipPin: document.getElementById('btnSkipPin'),
 
     // Модалка колонок
     modalColumnMapping: document.getElementById('modalColumnMapping'),
@@ -170,8 +176,8 @@
       renderSupplierTabs();
       await loadActiveSupplierSnapshot();
 
-      // 3. Фоновая проверка и синхронизация с облаком (если настроено)
-      backgroundCloudSync();
+      // 3. Запрос PIN при входе на сайт (если еще не введен) или фоновая синхронизация
+      checkAndPromptPinOnStartup();
 
     } catch (err) {
       console.error('Init error:', err);
@@ -470,9 +476,6 @@
     try {
       showToast('Чтение Excel файла...', 'info');
 
-      // Даем браузеру отрисовать уведомление перед тяжелым синхронным парсингом
-      await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 10)));
-
       const result = await window.ExcelParser.readWorkbook(file);
       state.currentWorkbook = result.workbook;
       state.currentFileName = file.name;
@@ -717,10 +720,8 @@
   }
 
   // ==========================================================================
-  // РЕНДЕР ТАБЛИЦЫ РЕЗУЛЬТАТОВ (ОПТИМИЗИРОВАННЫЙ ПОРЦИОННЫЙ РЕНДЕРИНГ)
+  // РЕНДЕР ТАБЛИЦЫ РЕЗУЛЬТАТОВ
   // ==========================================================================
-  const TABLE_CHUNK_SIZE = 120;
-
   function renderTable() {
     let items = state.diffItems;
 
@@ -755,8 +756,7 @@
       }
     });
 
-    state.filteredItems = items;
-    state.renderedRowsCount = 0;
+    // 4. Отрисовка
     dom.tableBody.innerHTML = '';
 
     if (items.length === 0) {
@@ -766,118 +766,83 @@
     }
 
     dom.tableEmptyState.style.display = 'none';
-
-    // Рендерим первую порцию мгновенно
-    appendTableRowsChunk();
-
-    // Если контейнер больше, чем первая порция, догружаем до заполнения видимой области
-    if (dom.tableWrapper) {
-      dom.tableWrapper.scrollTop = 0;
-      while (
-        state.renderedRowsCount < state.filteredItems.length &&
-        dom.tableWrapper.scrollHeight <= dom.tableWrapper.clientHeight + 60
-      ) {
-        appendTableRowsChunk();
-      }
-    }
-  }
-
-  function appendTableRowsChunk() {
-    if (state.renderedRowsCount >= state.filteredItems.length) return;
-
-    const nextBatch = state.filteredItems.slice(
-      state.renderedRowsCount,
-      state.renderedRowsCount + TABLE_CHUNK_SIZE
-    );
+    dom.footerStats.textContent = `Показано ${items.length} из ${state.diffItems.length} позиций`;
 
     const fragment = document.createDocumentFragment();
 
-    nextBatch.forEach(item => {
-      const tr = createTableRowElement(item);
+    items.forEach(item => {
+      const tr = document.createElement('tr');
+
+      // Статус
+      const tdStatus = document.createElement('td');
+      tdStatus.innerHTML = `<span class="status-badge badge-${item.status}">${item.statusLabel}</span>`;
+      tr.appendChild(tdStatus);
+
+      // Артикул
+      const tdCode = document.createElement('td');
+      tdCode.textContent = item.code || '—';
+      tdCode.style.color = 'var(--text-secondary)';
+      tdCode.style.fontSize = '12px';
+      tr.appendChild(tdCode);
+
+      // Наименование
+      const tdName = document.createElement('td');
+      tdName.textContent = item.name;
+      tdName.style.fontWeight = '500';
+      tr.appendChild(tdName);
+
+      // Было
+      const tdPrev = document.createElement('td');
+      tdPrev.style.textAlign = 'right';
+      tdPrev.textContent = item.prevStock;
+      tr.appendChild(tdPrev);
+
+      // Стало
+      const tdCurr = document.createElement('td');
+      tdCurr.style.textAlign = 'right';
+      tdCurr.innerHTML = `${item.currStock}${item.isTextStock ? `<span class="text-stock-tag" title="Текстовый маркер">${item.textStockNote}</span>` : ''}`;
+      tr.appendChild(tdCurr);
+
+      // Изменение
+      const tdDelta = document.createElement('td');
+      tdDelta.style.textAlign = 'right';
+
+      let deltaClass = 'delta-neutral';
+      let sign = '';
+      if (item.stockDelta > 0) {
+        deltaClass = 'delta-positive';
+        sign = '+';
+      } else if (item.stockDelta < 0) {
+        deltaClass = 'delta-negative';
+      }
+
+      const pctStr = item.stockDeltaPct !== 0 ? ` (${sign}${item.stockDeltaPct}%)` : '';
+      tdDelta.innerHTML = `<span class="delta-val ${deltaClass}">${sign}${item.stockDelta}${pctStr}</span>`;
+      tr.appendChild(tdDelta);
+
+      // Цена и дельта цены
+      const tdPrice = document.createElement('td');
+      tdPrice.style.textAlign = 'right';
+
+      if (item.currPrice !== null) {
+        let priceHtml = `${item.currPrice.toLocaleString('ru-RU')} ₽`;
+        if (item.priceDelta !== null && item.priceDelta !== 0) {
+          const pSign = item.priceDelta > 0 ? '+' : '';
+          const pClass = item.priceDelta > 0 ? 'delta-negative' : 'delta-positive'; // рост цены обычно красный
+          priceHtml += ` <br><span class="delta-val ${pClass}" style="font-size:11px;">${pSign}${item.priceDelta} ₽</span>`;
+        }
+        tdPrice.innerHTML = priceHtml;
+      } else if (item.prevPrice !== null) {
+        tdPrice.innerHTML = `<span style="text-decoration:line-through;color:var(--text-muted);">${item.prevPrice} ₽</span>`;
+      } else {
+        tdPrice.textContent = '—';
+      }
+      tr.appendChild(tdPrice);
+
       fragment.appendChild(tr);
     });
 
     dom.tableBody.appendChild(fragment);
-    state.renderedRowsCount += nextBatch.length;
-
-    // Обновляем статистику в подвале
-    if (state.renderedRowsCount < state.filteredItems.length) {
-      dom.footerStats.textContent = `Показано ${state.renderedRowsCount} из ${state.filteredItems.length} позиций (прокрутите вниз для догрузки)`;
-    } else {
-      dom.footerStats.textContent = `Показано ${state.filteredItems.length} из ${state.diffItems.length} позиций`;
-    }
-  }
-
-  function createTableRowElement(item) {
-    const tr = document.createElement('tr');
-
-    // Статус
-    const tdStatus = document.createElement('td');
-    tdStatus.innerHTML = `<span class="status-badge badge-${item.status}">${item.statusLabel}</span>`;
-    tr.appendChild(tdStatus);
-
-    // Артикул
-    const tdCode = document.createElement('td');
-    tdCode.textContent = item.code || '—';
-    tdCode.style.color = 'var(--text-secondary)';
-    tdCode.style.fontSize = '12px';
-    tr.appendChild(tdCode);
-
-    // Наименование
-    const tdName = document.createElement('td');
-    tdName.textContent = item.name;
-    tdName.style.fontWeight = '500';
-    tr.appendChild(tdName);
-
-    // Было
-    const tdPrev = document.createElement('td');
-    tdPrev.style.textAlign = 'right';
-    tdPrev.textContent = item.prevStock;
-    tr.appendChild(tdPrev);
-
-    // Стало
-    const tdCurr = document.createElement('td');
-    tdCurr.style.textAlign = 'right';
-    tdCurr.innerHTML = `${item.currStock}${item.isTextStock ? `<span class="text-stock-tag" title="Текстовый маркер">${item.textStockNote}</span>` : ''}`;
-    tr.appendChild(tdCurr);
-
-    // Изменение
-    const tdDelta = document.createElement('td');
-    tdDelta.style.textAlign = 'right';
-
-    let deltaClass = 'delta-neutral';
-    let sign = '';
-    if (item.stockDelta > 0) {
-      deltaClass = 'delta-positive';
-      sign = '+';
-    } else if (item.stockDelta < 0) {
-      deltaClass = 'delta-negative';
-    }
-
-    const pctStr = item.stockDeltaPct !== 0 ? ` (${sign}${item.stockDeltaPct}%)` : '';
-    tdDelta.innerHTML = `<span class="delta-val ${deltaClass}">${sign}${item.stockDelta}${pctStr}</span>`;
-    tr.appendChild(tdDelta);
-
-    // Цена и дельта цены
-    const tdPrice = document.createElement('td');
-    tdPrice.style.textAlign = 'right';
-
-    if (item.currPrice !== null) {
-      let priceHtml = `${item.currPrice.toLocaleString('ru-RU')} ₽`;
-      if (item.priceDelta !== null && item.priceDelta !== 0) {
-        const pSign = item.priceDelta > 0 ? '+' : '';
-        const pClass = item.priceDelta > 0 ? 'delta-negative' : 'delta-positive'; // рост цены обычно красный
-        priceHtml += ` <br><span class="delta-val ${pClass}" style="font-size:11px;">${pSign}${item.priceDelta} ₽</span>`;
-      }
-      tdPrice.innerHTML = priceHtml;
-    } else if (item.prevPrice !== null) {
-      tdPrice.innerHTML = `<span style="text-decoration:line-through;color:var(--text-muted);">${item.prevPrice} ₽</span>`;
-    } else {
-      tdPrice.textContent = '—';
-    }
-    tr.appendChild(tdPrice);
-
-    return tr;
   }
 
   // ==========================================================================
@@ -1312,6 +1277,92 @@
     }
   }
 
+  // ==========================================================================
+  // АВТОРИЗАЦИЯ И ЗАПРОС PIN ПРИ ВХОДЕ НА САЙТ
+  // ==========================================================================
+  function checkAndPromptPinOnStartup() {
+    const hasPin = window.PriceStorage.hasAuthenticatedPin();
+    if (!hasPin) {
+      // Если PIN не сохранен или сессия не активна — запрашиваем PIN при входе
+      openPinPromptModal();
+    } else {
+      // Если PIN уже авторизован — запускаем фоновую синхронизацию
+      backgroundCloudSync();
+    }
+  }
+
+  function openPinPromptModal() {
+    if (dom.sitePinInput) dom.sitePinInput.value = '';
+    showPinPromptError('');
+    openModal('modalPinPrompt');
+    setTimeout(() => {
+      if (dom.sitePinInput) dom.sitePinInput.focus();
+    }, 120);
+  }
+
+  function closePinPromptModal() {
+    closeModal('modalPinPrompt');
+  }
+
+  function showPinPromptError(msg) {
+    if (!dom.pinPromptError) return;
+    if (msg) {
+      dom.pinPromptError.textContent = msg;
+      dom.pinPromptError.style.display = 'block';
+    } else {
+      dom.pinPromptError.textContent = '';
+      dom.pinPromptError.style.display = 'none';
+    }
+  }
+
+  function setPinSubmitLoading(isLoading) {
+    if (dom.btnSubmitPin) dom.btnSubmitPin.disabled = isLoading;
+    if (dom.btnSubmitPinText) {
+      dom.btnSubmitPinText.textContent = isLoading ? 'Проверка PIN...' : 'Войти и подключить облако';
+    }
+  }
+
+  async function submitPinFromPrompt() {
+    const pin = dom.sitePinInput ? dom.sitePinInput.value.trim() : '';
+    if (!pin) {
+      showPinPromptError('Пожалуйста, введите PIN-код доступа');
+      if (dom.sitePinInput) dom.sitePinInput.focus();
+      return;
+    }
+
+    const config = window.PriceStorage.getCloudConfig();
+    const url = config.url || window.PriceStorage.DEFAULT_CLOUD_URL;
+    const remember = dom.rememberPinCheckbox ? dom.rememberPinCheckbox.checked : true;
+
+    try {
+      setPinSubmitLoading(true);
+      showPinPromptError('');
+
+      // 1. Проверяем токен через тестовый запрос к Google Apps Script
+      await window.PriceStorage.testCloudConnection(url, pin);
+
+      // 2. Сохраняем проверенный PIN
+      window.PriceStorage.setCloudConfig(url, pin, remember);
+
+      // 3. Закрываем модальное окно
+      closePinPromptModal();
+      showToast('PIN подтвержден! Облако успешно подключено', 'success');
+
+      // 4. Запускаем синхронизацию остатков из Google Таблицы
+      await backgroundCloudSync();
+
+    } catch (err) {
+      console.error('PIN verification error:', err);
+      showPinPromptError(err.message || 'Неверный PIN-код или ошибка подключения');
+      if (dom.sitePinInput) {
+        dom.sitePinInput.focus();
+        dom.sitePinInput.select();
+      }
+    } finally {
+      setPinSubmitLoading(false);
+    }
+  }
+
   function setupCloudStatusListener() {
     window.PriceStorage.onSyncStatusChange((status, message) => {
       dom.cloudStatusBadge.className = `cloud-status-badge ${status}`;
@@ -1363,10 +1414,48 @@
     dom.btnThemeToggle.addEventListener('click', toggleTheme);
 
     // Модалки шапки
-    dom.cloudStatusBadge.addEventListener('click', openCloudSettingsModal);
+    dom.cloudStatusBadge.addEventListener('click', () => {
+      if (!window.PriceStorage.hasAuthenticatedPin()) {
+        openPinPromptModal();
+      } else {
+        openCloudSettingsModal();
+      }
+    });
     dom.btnOpenCloudSettings.addEventListener('click', openCloudSettingsModal);
     dom.btnOpenMapping.addEventListener('click', openMappingModal);
     dom.btnTuneColumns.addEventListener('click', openMappingModal);
+
+    // Авторизация и ввод PIN при входе
+    if (dom.btnSubmitPin) {
+      dom.btnSubmitPin.addEventListener('click', submitPinFromPrompt);
+    }
+    if (dom.sitePinInput) {
+      dom.sitePinInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitPinFromPrompt();
+      });
+    }
+    if (dom.btnTogglePinVisibility) {
+      dom.btnTogglePinVisibility.addEventListener('click', () => {
+        const isPass = dom.sitePinInput.type === 'password';
+        dom.sitePinInput.type = isPass ? 'text' : 'password';
+      });
+    }
+    if (dom.btnSkipPin) {
+      dom.btnSkipPin.addEventListener('click', () => {
+        closePinPromptModal();
+        showToast('Работа в офлайн режиме (локальное хранилище)', 'info');
+      });
+    }
+    if (dom.btnClearPin) {
+      dom.btnClearPin.addEventListener('click', () => {
+        if (confirm('Сбросить сохраненный PIN-код и выйти из облака?')) {
+          window.PriceStorage.clearCloudAuth();
+          closeModal('modalCloudSettings');
+          showToast('PIN сброшен. Облако отключено', 'info');
+          openPinPromptModal();
+        }
+      });
+    }
 
     // Закрытие модалок по кнопкам с атрибутом [data-close-modal]
     document.querySelectorAll('[data-close-modal]').forEach(btn => {
@@ -1434,26 +1523,11 @@
       });
     });
 
-    // Поиск с дебаунсом (исключает лишние перерисовки при быстром вводе текста)
-    let searchDebounceTimer = null;
+    // Поиск
     dom.searchInput.addEventListener('input', (e) => {
-      clearTimeout(searchDebounceTimer);
-      searchDebounceTimer = setTimeout(() => {
-        state.searchQuery = e.target.value.trim();
-        renderTable();
-      }, 120);
+      state.searchQuery = e.target.value.trim();
+      renderTable();
     });
-
-    // Плавная динамическая подгрузка строк при скролле таблицы
-    if (dom.tableWrapper) {
-      dom.tableWrapper.addEventListener('scroll', () => {
-        if (state.renderedRowsCount < state.filteredItems.length) {
-          if (dom.tableWrapper.scrollTop + dom.tableWrapper.clientHeight >= dom.tableWrapper.scrollHeight - 250) {
-            appendTableRowsChunk();
-          }
-        }
-      }, { passive: true });
-    }
 
     // Сортировка заголовков таблицы
     dom.tableHeaders.forEach(th => {
@@ -1505,11 +1579,7 @@
     dom.btnApplyMapping.addEventListener('click', applyCustomMapping);
   }
 
-  // Запуск при готовности DOM (совместимо с defer/async)
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initApp);
-  } else {
-    initApp();
-  }
+  // Запуск при готовности DOM
+  document.addEventListener('DOMContentLoaded', initApp);
 
 })();
