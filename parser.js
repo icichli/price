@@ -128,7 +128,6 @@ class ExcelParser {
       let hasName = false;
       let hasStock = false;
       let hasCode = false;
-      let hasPrice = false;
       let isReportTitle = false;
       let matchCount = 0;
 
@@ -154,10 +153,6 @@ class ExcelParser {
         }
         if (!hasCode && this._matchesKeywords(cellText, this.KEYWORD_DICTIONARY.code)) {
           hasCode = true;
-          matchCount += 2;
-        }
-        if (!hasPrice && this._matchesKeywords(cellText, this.KEYWORD_DICTIONARY.price)) {
-          hasPrice = true;
           matchCount += 2;
         }
       }
@@ -220,6 +215,7 @@ class ExcelParser {
    * Проверка совпадения текста ячейки со словарем ключевых слов
    */
   _matchesKeywords(text, keywords) {
+    if (!keywords || !Array.isArray(keywords)) return false;
     const clean = text.replace(/[^a-zа-я0-9\s]/gi, ' ').replace(/\s+/g, ' ').trim();
     return keywords.some(k => {
       if (clean === k) return true;
@@ -425,7 +421,7 @@ class ExcelParser {
   /**
    * Проверка, является ли строка категорией / подзаголовком / группировкой 1С
    */
-  isCategoryOrSummaryRow(nameStr, rawStock, rawUnit) {
+  isCategoryOrSummaryRow(nameStr, rawStock, rawUnit, hasUnitCol = false) {
     const lower = nameStr.toLowerCase().trim();
 
     // 1. Итоговые строки 1С
@@ -433,21 +429,23 @@ class ExcelParser {
       return true;
     }
 
-    // 2. Строки категорий, где остаток полностью пустой
-    const isStockEmpty = (rawStock === null || rawStock === undefined || String(rawStock).trim() === '');
-    if (isStockEmpty) {
-      return true;
+    const hasPackagingMarker = /(?:\d+(?:[\.,]\d+)?\s*(?:л|мл|кг|г|шт|ж\/б|ст|пэт|кег)|кег|пэт|ж\/б)/i.test(nameStr);
+
+    // 2. Если в прайсе есть колонка единиц измерения (специфика 1С: у групп и итогов единица всегда пустая)
+    if (hasUnitCol) {
+      const unitStr = (rawUnit !== null && rawUnit !== undefined) ? String(rawUnit).trim().toLowerCase() : '';
+      if (!unitStr && !hasPackagingMarker) {
+        return true; // Строка группировки (например: "КРАФТ разливное", "Аляска", "Пиво разливное")
+      }
+      if (unitStr) {
+        return false; // Позиция товара с указанной единицей измерения (даже если остаток временно пустой)
+      }
     }
 
-    // 3. Специфика отчетов 1С с промежуточными суммами по группам
-    if (rawUnit !== null && rawUnit !== undefined) {
-      const unitStr = String(rawUnit).trim().toLowerCase();
-      if (!unitStr) {
-        const hasPackagingMarker = /(?:\d+(?:[\.,]\d+)?\s*(?:л|мл|кг|г|шт|ж\/б|ст|пэт|кег)|кег|пэт|ж\/б)/i.test(nameStr);
-        if (!hasPackagingMarker) {
-          return true; // Это строка группировки (например: "Вода питьевая", "КРАФТ разливное", "Аляска")
-        }
-      }
+    // 3. Для прайсов без единицы измерения — проверка по пустому остатку
+    const isStockEmpty = (rawStock === null || rawStock === undefined || String(rawStock).trim() === '');
+    if (isStockEmpty && !hasPackagingMarker) {
+      return true;
     }
 
     return false;
@@ -463,9 +461,14 @@ class ExcelParser {
       throw new Error('Колонки «Наименование» и «Остаток» обязательны для сопоставления');
     }
 
+    const hasUnitCol = unitCol >= 0;
     const items = [];
     let skippedCategoriesCount = 0;
-    let currentCategory = '';
+    let currentMainCategory = '';
+    let currentSubCategory = '';
+
+    // Шаблон для разделов верхнего уровня (формат, тип напитка, складская группа)
+    const MAIN_CAT_PATTERN = /(?:разлив|фасовк|кег|бочк|бутыл|стекл|ж\/?б|снек|лимонад|сигарет|сопутствующ|аксессуар|чипсы|гренки|(?:^|[\s_/-])(?:вод[аыеу]|сок[а-я]*|сыр[а-я]*|рыб[а-я]*|сидр[а-я]*|импорт)(?:$|[\s_/-]))/i;
 
     for (let r = headerRowIndex + 1; r < sheetData.length; r++) {
       const row = sheetData[r];
@@ -474,17 +477,25 @@ class ExcelParser {
       const rawName = row[nameCol];
       const rawStock = row[stockCol];
       const rawCode = codeCol >= 0 ? row[codeCol] : null;
-      const rawUnit = unitCol >= 0 ? row[unitCol] : null;
+      const rawUnit = hasUnitCol ? row[unitCol] : null;
 
       const nameStr = String(rawName || '').trim();
       if (!nameStr) continue;
 
       // Пропускаем категории, группировки и строки Итого, фиксируя текущий раздел
-      if (this.isCategoryOrSummaryRow(nameStr, rawStock, rawUnit)) {
+      if (this.isCategoryOrSummaryRow(nameStr, rawStock, rawUnit, hasUnitCol)) {
         skippedCategoriesCount++;
         const lowerCat = nameStr.toLowerCase().trim();
         if (lowerCat !== 'итого' && !lowerCat.startsWith('итого') && lowerCat !== 'всего') {
-          currentCategory = nameStr;
+          if (MAIN_CAT_PATTERN.test(nameStr)) {
+            currentMainCategory = nameStr;
+            currentSubCategory = '';
+          } else if (currentMainCategory) {
+            currentSubCategory = nameStr;
+          } else {
+            currentMainCategory = nameStr;
+            currentSubCategory = '';
+          }
         }
         continue;
       }
@@ -492,14 +503,15 @@ class ExcelParser {
       const parsedStock = this.parseStockValue(rawStock);
       const codeStr = rawCode !== null && rawCode !== undefined ? String(rawCode).trim() : '';
       const normalizedName = this.normalizeItemName(nameStr);
-      const packageInfo = this.detectPackageType(nameStr, rawUnit, currentCategory);
+      const packageInfo = this.detectPackageType(nameStr, rawUnit, currentMainCategory);
 
       items.push({
         id: `item_${r}_${Date.now()}`,
         code: codeStr,
         name: nameStr,
         normalizedName: normalizedName,
-        category: currentCategory,
+        category: currentMainCategory,
+        subCategory: currentSubCategory,
         packageType: packageInfo.type,       // 'draft' | 'bottle' | 'other'
         packageSubType: packageInfo.subType, // 'keg' | 'bottle' | 'can' | 'other'
         packageLabel: packageInfo.label,     // 'Разливное' | 'Бутылочное' | 'Банка'

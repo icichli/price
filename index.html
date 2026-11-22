@@ -85,13 +85,35 @@
       <div id="supplierTabsContainer" class="suppliers-tabs">
         <!-- Вкладки поставщиков генерируются через JS -->
       </div>
-      <button id="btnAddSupplier" class="tab-add-btn" title="Добавить нового поставщика">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19"></line>
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-        <span>Поставщик</span>
-      </button>
+      <div class="dropdown-container supplier-menu-container">
+        <button id="btnSupplierMenuToggle" class="tab-add-btn" title="Управление поставщиками">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>Поставщик</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <div id="supplierDropdownMenu" class="dropdown-menu supplier-dropdown-menu">
+          <button id="btnMenuAddSupplier" class="dropdown-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>Добавить поставщика...</span>
+          </button>
+          <div class="dropdown-divider"></div>
+          <button id="btnMenuDeleteSupplier" class="dropdown-item dropdown-item-danger">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            <span id="btnMenuDeleteSupplierText">Удалить текущего</span>
+          </button>
+        </div>
+      </div>
     </nav>
 
     <!-- СЕКЦИЯ ЗАГРУЗКИ ФАЙЛА И ПРЕДПРОСМОТРА -->
@@ -124,39 +146,90 @@
           <span id="loadedFileBaseline" class="file-stats-badge">База: Не сохранена</span>
         </div>
         <div class="file-actions">
-          <button id="btnTuneColumns" class="btn btn-secondary">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-            <span>Настроить колонки</span>
-          </button>
-          <button id="btnChangeFile" class="btn btn-secondary">
-            <span>Сменить файл</span>
-          </button>
+          <!-- Группа управления базой (компактные иконки 32x32) -->
+          <div class="card-icon-group" title="Управление базой остатков">
+            <button id="btnCommitSnapshot" class="btn-icon btn-icon-success" disabled title="Принять и зафиксировать текущий прайс в базе">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              <span class="sr-only">Принять и обновить базу</span>
+            </button>
+            <button id="btnRollbackSnapshot" class="btn-icon btn-icon-secondary" disabled title="Откатить базу к предыдущему снимку">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              </svg>
+              <span class="sr-only">Откатить базу</span>
+            </button>
+            <button id="btnClearSnapshot" class="btn-icon btn-icon-danger" disabled title="Полностью очистить сохраненную базу поставщика">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span class="sr-only">Очистить базу</span>
+            </button>
+          </div>
+
+          <div class="file-actions-divider"></div>
+
+          <!-- Настройка колонок и смена файла -->
+          <div class="card-icon-group">
+            <button id="btnTuneColumns" class="btn-icon btn-icon-secondary" title="Настроить соответствие колонок">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+              <span class="sr-only">Настроить колонки</span>
+            </button>
+            <button id="btnChangeFile" class="btn-icon btn-icon-secondary" title="Сменить загруженный файл">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+              </svg>
+              <span class="sr-only">Сменить файл</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- ПАНЕЛЬ ПОРОГОВЫХ ЗНАЧЕНИЙ -->
-    <div class="controls-card">
-      <div class="thresholds-group">
-        <strong style="font-size: 13px; color: var(--text-primary);">Пороги фильтрации:</strong>
-        <div class="threshold-item">
-          <label for="threshGrowthPct">Рост от %:</label>
-          <input type="number" id="threshGrowthPct" class="threshold-input" value="50" min="1" max="1000">
+    <!-- ПАНЕЛЬ ПОРОГОВЫХ ЗНАЧЕНИЙ (СВОРАЧИВАЕМАЯ) -->
+    <div class="controls-card thresholds-card" id="thresholdsCard">
+      <div class="thresholds-header" id="thresholdsHeader" title="Нажмите, чтобы развернуть/свернуть пороги фильтрации">
+        <div class="thresholds-header-title">
+          <svg class="thresholds-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <strong>Пороги:</strong>
+          <span id="thresholdsSummary" class="thresholds-summary-text">Рост ≥ 50% или ≥ 10 шт. | Мало &lt; 5 шт.</span>
         </div>
-        <div class="threshold-item">
-          <label for="threshGrowthQty">ИЛИ от ед.:</label>
-          <input type="number" id="threshGrowthQty" class="threshold-input" value="10" min="1" max="10000">
-        </div>
-        <div class="threshold-item">
-          <label for="threshLowQty">Меньше ед. (мало):</label>
-          <input type="number" id="threshLowQty" class="threshold-input" value="5" min="0" max="10000">
+        <div class="thresholds-toggle-indicator">
+          <span class="thresholds-toggle-label">Настроить</span>
+          <svg class="thresholds-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
         </div>
       </div>
-      <div style="font-size: 12px; color: var(--text-muted);">
-        Пересчет происходит мгновенно без перезагрузки файла
+      <div class="thresholds-body" id="thresholdsBody">
+        <div class="thresholds-group">
+          <div class="threshold-item">
+            <label for="threshGrowthPct">Рост от %:</label>
+            <input type="number" id="threshGrowthPct" class="threshold-input" value="50" min="1" max="1000">
+          </div>
+          <div class="threshold-item">
+            <label for="threshGrowthQty">ИЛИ от ед.:</label>
+            <input type="number" id="threshGrowthQty" class="threshold-input" value="10" min="1" max="10000">
+          </div>
+          <div class="threshold-item">
+            <label for="threshLowQty">Меньше ед. (мало):</label>
+            <input type="number" id="threshLowQty" class="threshold-input" value="5" min="0" max="10000">
+          </div>
+        </div>
+        <div class="thresholds-hint">
+          Пересчет происходит мгновенно
+        </div>
       </div>
     </div>
 
@@ -170,15 +243,15 @@
             <span class="tab-badge" id="badgeAll">0</span>
           </button>
           <button class="filter-tab" data-filter="new">
-            <span>Новинки</span>
+            <span>Появилось</span>
             <span class="tab-badge" id="badgeNew">0</span>
           </button>
-          <button class="filter-tab" data-filter="growth">
-            <span>Поступление / Рост</span>
+          <button class="filter-tab" data-filter="growth" title="Поступление / Рост">
+            <span class="tab-symbol tab-symbol-plus">+</span>
             <span class="tab-badge" id="badgeGrowth">0</span>
           </button>
-          <button class="filter-tab" data-filter="drop">
-            <span>Падение / Мало</span>
+          <button class="filter-tab" data-filter="drop" title="Падение / Мало">
+            <span class="tab-symbol tab-symbol-minus">−</span>
             <span class="tab-badge" id="badgeDrop">0</span>
           </button>
           <button class="filter-tab" data-filter="out">
@@ -212,7 +285,7 @@
         </div>
       </div>
 
-      <!-- Строка поиска и ключевые кнопки действий -->
+      <!-- Строка поиска, фильтр групп и выгрузка списка -->
       <div class="actions-row">
         <div class="search-box">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -222,49 +295,33 @@
           <input type="text" id="searchInput" class="search-input" placeholder="Поиск по названию или артикулу...">
         </div>
 
-        <div class="main-actions-group">
-          <!-- Кнопка «Принять и обновить базу» -->
-          <button id="btnCommitSnapshot" class="btn btn-success" disabled title="Зафиксировать текущий прайс как эталон в IndexedDB и отправить в Google Таблицу">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="20 6 9 17 4 12"></polyline>
+        <!-- Компактный выпадающий список групп / пивоварен из файла -->
+        <div class="group-filter-container" id="groupFilterContainer" style="display: none;">
+          <div class="select-wrapper">
+            <svg class="select-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
             </svg>
-            <span>Принять и обновить базу</span>
-          </button>
+            <select id="groupFilterSelect" class="group-filter-select" title="Фильтр по группам и пивоварням из файла">
+              <option value="all">Все разделы файла</option>
+            </select>
+          </div>
+        </div>
 
-          <!-- Кнопка «Откатить базу» -->
-          <button id="btnRollbackSnapshot" class="btn btn-secondary" disabled title="Восстановить предыдущий снимок остатков">
+        <div class="dropdown-container">
+          <button id="btnExportMenuToggle" class="btn btn-secondary" title="Выгрузить отфильтрованные позиции">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="1 4 1 10 7 10"></polyline>
-              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-            <span>Откатить базу</span>
-          </button>
-
-          <!-- Кнопка «Очистить базу» -->
-          <button id="btnClearSnapshot" class="btn btn-secondary btn-danger-outline" disabled title="Полностью очистить сохраненную базу остатков выбранного поставщика">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
+            <span>Выгрузить список</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
-            <span>Очистить базу</span>
           </button>
-
-          <!-- Выпадающее меню «Выгрузить список» -->
-          <div class="dropdown-container">
-            <button id="btnExportMenuToggle" class="btn btn-secondary" title="Выгрузить отфильтрованные позиции">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span>Выгрузить список</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            </button>
-            <div id="exportDropdownMenu" class="dropdown-menu">
+          <div id="exportDropdownMenu" class="dropdown-menu">
               <button id="btnExportExcel" class="dropdown-item">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>

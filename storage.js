@@ -715,7 +715,8 @@ class StorageManager {
         packageSubType: item.packageSubType || '',
         packageLabel: item.packageLabel || '',
         packageIcon: item.packageIcon || '',
-        category: item.category || ''
+        category: item.category || '',
+        subCategory: item.subCategory || ''
       };
       return clean;
     });
@@ -725,15 +726,19 @@ class StorageManager {
     if (!Array.isArray(items)) return [];
     return items.map(i => {
       // 1. Простейший кортеж: [name, stock]
-      if (!i.code && !i.isTextStock && !i.packageType) {
+      if (!i.code && !i.isTextStock && !i.packageType && !i.category && !i.subCategory) {
         return [i.name, i.stock];
       }
-      // 2. Кортеж: [name, stock, code, isTextStock ? 1 : 0, textStockNote, packageType]
+      // 2. Кортеж: [name, stock, code, isTextStock ? 1 : 0, textStockNote, packageType, category, subCategory]
       const arr = [i.name, i.stock, i.code || ''];
-      if (i.isTextStock || i.packageType) {
+      if (i.isTextStock || i.packageType || i.category || i.subCategory) {
         arr.push(i.isTextStock ? 1 : 0);
         arr.push(i.textStockNote || '');
         arr.push(i.packageType || '');
+        if (i.category || i.subCategory) {
+          arr.push(i.category || '');
+          arr.push(i.subCategory || '');
+        }
       }
       return arr;
     });
@@ -749,7 +754,9 @@ class StorageManager {
           code: i[2] || '',
           isTextStock: i[3] === 1 || i[4] === 1,
           textStockNote: (typeof i[4] === 'string' ? i[4] : (typeof i[5] === 'string' ? i[5] : '')),
-          packageType: i[5] && typeof i[5] === 'string' && ['draft', 'bottle', 'other'].includes(i[5]) ? i[5] : ''
+          packageType: i[5] && typeof i[5] === 'string' && ['draft', 'bottle', 'other'].includes(i[5]) ? i[5] : '',
+          category: typeof i[6] === 'string' ? i[6] : '',
+          subCategory: typeof i[7] === 'string' ? i[7] : ''
         };
       }
       return {
@@ -762,7 +769,8 @@ class StorageManager {
         packageSubType: i.packageSubType || '',
         packageLabel: i.packageLabel || '',
         packageIcon: i.packageIcon || '',
-        category: i.category || ''
+        category: i.category || '',
+        subCategory: i.subCategory || ''
       };
     });
   }

@@ -42,6 +42,7 @@
     // Фильтрация, сортировка и поиск
     activeFilter: 'all', // 'all' | 'new' | 'growth' | 'drop' | 'out'
     subFilter: 'all',    // 'all' | 'draft' | 'bottle'
+    groupFilter: 'all',  // 'all' | 'main:Категория' | 'sub:Категория|Подкатегория'
     searchQuery: '',
     sortField: 'stockDelta',
     sortDir: 'desc',
@@ -73,7 +74,11 @@
 
     // Поставщики
     supplierTabsContainer: document.getElementById('supplierTabsContainer'),
-    btnAddSupplier: document.getElementById('btnAddSupplier'),
+    btnSupplierMenuToggle: document.getElementById('btnSupplierMenuToggle'),
+    supplierDropdownMenu: document.getElementById('supplierDropdownMenu'),
+    btnMenuAddSupplier: document.getElementById('btnMenuAddSupplier'),
+    btnMenuDeleteSupplier: document.getElementById('btnMenuDeleteSupplier'),
+    btnMenuDeleteSupplierText: document.getElementById('btnMenuDeleteSupplierText'),
 
     // Загрузка файла
     dropzone: document.getElementById('dropzone'),
@@ -86,6 +91,9 @@
     btnChangeFile: document.getElementById('btnChangeFile'),
 
     // Пороги
+    thresholdsCard: document.getElementById('thresholdsCard'),
+    thresholdsHeader: document.getElementById('thresholdsHeader'),
+    thresholdsSummary: document.getElementById('thresholdsSummary'),
     threshGrowthPct: document.getElementById('threshGrowthPct'),
     threshGrowthQty: document.getElementById('threshGrowthQty'),
     threshLowQty: document.getElementById('threshLowQty'),
@@ -103,6 +111,8 @@
     subBadgeDraft: document.getElementById('subBadgeDraft'),
     subBadgeBottle: document.getElementById('subBadgeBottle'),
     searchInput: document.getElementById('searchInput'),
+    groupFilterContainer: document.getElementById('groupFilterContainer'),
+    groupFilterSelect: document.getElementById('groupFilterSelect'),
 
     btnCommitSnapshot: document.getElementById('btnCommitSnapshot'),
     btnRollbackSnapshot: document.getElementById('btnRollbackSnapshot'),
@@ -261,34 +271,14 @@
       nameSpan.textContent = sup.name;
       tab.appendChild(nameSpan);
 
-      // Иконка удаления (если поставщиков больше 1)
-      if (state.suppliers.length > 1) {
-        const delIcon = document.createElement('span');
-        delIcon.className = 'tab-action-icon tab-delete-icon';
-        delIcon.title = 'Удалить поставщика';
-        delIcon.innerHTML = `
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        `;
-        delIcon.addEventListener('click', (e) => {
-          e.stopPropagation();
-          deleteSupplier(sup);
-        });
-        tab.appendChild(delIcon);
-      }
-
-      // Логика удержания (long-press) для переименования поставщика без иконки карандаша
+      // Логика удержания (long-press) для переименования поставщика
       let pressTimer = null;
       let isLongPress = false;
       let startX = 0;
       let startY = 0;
 
       const startPress = (e) => {
-        // Игнорируем правую кнопку мыши или клик по кнопке удаления
         if (e.button && e.button !== 0) return;
-        if (e.target.closest('.tab-delete-icon')) return;
 
         isLongPress = false;
         startX = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
@@ -318,7 +308,6 @@
         if (!pressTimer) return;
         const currentX = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
         const currentY = e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
-        // Если палец/курсор сместился более чем на 8px (скролл ленты вкладок), отменяем удержание
         if (Math.abs(currentX - startX) > 8 || Math.abs(currentY - startY) > 8) {
           cancelPress();
         }
@@ -345,7 +334,6 @@
 
       // Переименование по двойному клику на ПК
       tab.addEventListener('dblclick', (e) => {
-        if (e.target.closest('.tab-delete-icon')) return;
         e.preventDefault();
         cancelPress();
         openEditSupplierModal(sup);
@@ -359,12 +347,44 @@
           isLongPress = false;
           return;
         }
-        if (e.target.closest('.tab-delete-icon')) return;
         switchSupplier(sup.id);
       });
 
       dom.supplierTabsContainer.appendChild(tab);
     });
+
+    // Синхронизируем кнопку удаления активного поставщика в меню
+    const activeSup = state.suppliers.find(s => s.id === state.activeSupplierId);
+    if (dom.btnMenuDeleteSupplierText && activeSup) {
+      dom.btnMenuDeleteSupplierText.textContent = `Удалить «${activeSup.name}»`;
+    }
+    if (dom.btnMenuDeleteSupplier) {
+      const canDelete = state.suppliers.length > 1;
+      dom.btnMenuDeleteSupplier.disabled = !canDelete;
+      dom.btnMenuDeleteSupplier.style.opacity = canDelete ? '1' : '0.4';
+      dom.btnMenuDeleteSupplier.style.cursor = canDelete ? 'pointer' : 'not-allowed';
+      dom.btnMenuDeleteSupplier.title = canDelete ? '' : 'Нельзя удалить единственного поставщика';
+    }
+  }
+
+  function toggleSupplierDropdown() {
+    if (dom.supplierDropdownMenu) {
+      dom.supplierDropdownMenu.classList.toggle('show');
+    }
+  }
+
+  function closeSupplierDropdown() {
+    if (dom.supplierDropdownMenu) {
+      dom.supplierDropdownMenu.classList.remove('show');
+    }
+  }
+
+  function updateThresholdsSummary() {
+    if (!dom.thresholdsSummary) return;
+    const pct = dom.threshGrowthPct ? dom.threshGrowthPct.value : state.thresholds.growthPct;
+    const qty = dom.threshGrowthQty ? dom.threshGrowthQty.value : state.thresholds.growthQty;
+    const low = dom.threshLowQty ? dom.threshLowQty.value : state.thresholds.lowQty;
+    dom.thresholdsSummary.textContent = `Рост ≥ ${pct}% или ≥ ${qty} шт. | Мало < ${low} шт.`;
   }
 
   async function switchSupplier(supplierId) {
@@ -403,6 +423,7 @@
       renderTable();
     } else {
       state.diffItems = [];
+      updateGroupFilterOptions();
       updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
       dom.fileCard.classList.remove('visible');
       renderTable();
@@ -420,6 +441,8 @@
         statusLabel: 'В базе',
         code: item.code || '',
         name: item.name,
+        category: item.category || '',
+        subCategory: item.subCategory || '',
         packageType: pkgInfo.type,
         packageSubType: pkgInfo.subType,
         packageLabel: pkgInfo.label,
@@ -440,6 +463,7 @@
       drop: 0,
       out: 0
     };
+    updateGroupFilterOptions();
     updateBadges(stats);
     renderTable();
   }
@@ -671,6 +695,8 @@
     state.currentSheetName = '';
     state.currentSheetData = [];
     state.parsedItems = [];
+    state.groupFilter = 'all';
+    state.subFilter = 'all';
     dom.fileInput.value = '';
     dom.btnCommitSnapshot.disabled = true;
 
@@ -699,6 +725,7 @@
       isShowingCommittedShipment = true;
     } else {
       state.diffItems = [];
+      updateGroupFilterOptions();
       updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
       dom.fileCard.classList.remove('visible');
       return;
@@ -755,10 +782,10 @@
       let status = 'normal';
       let statusLabel = 'В наличии';
 
-      // 1. Новинка: не было в прошлом снимке или был 0, а стал > 0
+      // 1. Появилось (новинка): не было в прошлом снимке или был 0, а стал > 0
       if (!prev || (prevStock === 0 && currStock > 0)) {
         status = 'new';
-        statusLabel = 'Новинка';
+        statusLabel = 'Появилось';
         newCount++;
       }
       // 2. Выбыло: был > 0, стал 0
@@ -767,16 +794,16 @@
         statusLabel = 'Выбыло (0)';
         outCount++;
       }
-      // 3. Сильный рост / Поступление: вырос больше чем на порог % ИЛИ порог ед.
+      // 3. Сильный рост / Поступление (+): вырос больше чем на порог % ИЛИ порог ед.
       else if (stockDelta > 0 && (stockDeltaPct >= state.thresholds.growthPct || stockDelta >= state.thresholds.growthQty)) {
         status = 'growth';
-        statusLabel = 'Поступление';
+        statusLabel = '+';
         growthCount++;
       }
-      // 4. Резкое падение / Мало: остаток упал или стал меньше критического порога
+      // 4. Резкое падение / Мало (-): остаток упал или стал меньше критического порога
       else if (stockDelta < 0 && (currStock < state.thresholds.lowQty || stockDeltaPct <= -30)) {
         status = 'drop';
-        statusLabel = 'Мало / Спад';
+        statusLabel = '-';
         dropCount++;
       }
 
@@ -790,6 +817,8 @@
         statusLabel,
         code: curr.code || (prev ? prev.code : ''),
         name: curr.name,
+        category: curr.category || (prev ? prev.category : ''),
+        subCategory: curr.subCategory || (prev ? prev.subCategory : ''),
         packageType: pkgInfo.type,
         packageSubType: pkgInfo.subType,
         packageLabel: pkgInfo.label,
@@ -815,6 +844,8 @@
           statusLabel: 'Выбыло (нет в прайсе)',
           code: prev.code || '',
           name: prev.name,
+          category: prev.category || '',
+          subCategory: prev.subCategory || '',
           packageType: pkgInfo.type,
           packageSubType: pkgInfo.subType,
           packageLabel: pkgInfo.label,
@@ -839,6 +870,7 @@
       out: outCount
     };
 
+    updateGroupFilterOptions();
     updateBadges(state.diffStats);
 
     if (isShowingCommittedShipment) {
@@ -893,6 +925,17 @@
       baseItems = baseItems.filter(i => i.status === state.activeFilter);
     }
 
+    // Учитываем фильтр по группе из файла (связка фильтров)
+    if (state.groupFilter && state.groupFilter !== 'all') {
+      if (state.groupFilter.startsWith('main:')) {
+        const targetMain = state.groupFilter.slice(5);
+        baseItems = baseItems.filter(i => i.category === targetMain);
+      } else if (state.groupFilter.startsWith('sub:')) {
+        const [targetMain, targetSub] = state.groupFilter.slice(4).split('|');
+        baseItems = baseItems.filter(i => i.category === targetMain && i.subCategory === targetSub);
+      }
+    }
+
     let draftCount = 0;
     let bottleCount = 0;
 
@@ -924,6 +967,77 @@
     }
   }
 
+  /**
+   * Обновление выпадающего списка групп / пивоварен из загруженного файла
+   */
+  function updateGroupFilterOptions() {
+    if (!dom.groupFilterContainer || !dom.groupFilterSelect) return;
+
+    // Собираем группы и подгруппы из diffItems
+    const mainCategories = new Map();
+
+    state.diffItems.forEach(item => {
+      const mainCat = (item.category || '').trim();
+      const subCat = (item.subCategory || '').trim();
+
+      if (mainCat) {
+        if (!mainCategories.has(mainCat)) {
+          mainCategories.set(mainCat, new Map());
+        }
+        if (subCat) {
+          const subMap = mainCategories.get(mainCat);
+          subMap.set(subCat, (subMap.get(subCat) || 0) + 1);
+        }
+      }
+    });
+
+    // Если в файле нет разделов — скрываем фильтр групп
+    if (mainCategories.size === 0) {
+      dom.groupFilterContainer.style.display = 'none';
+      state.groupFilter = 'all';
+      return;
+    }
+
+    dom.groupFilterContainer.style.display = 'flex';
+
+    // Формируем структуру с <optgroup> для главных разделов и <option> для подгрупп
+    let html = `<option value="all">Все разделы (${state.diffItems.length})</option>`;
+
+    mainCategories.forEach((subMap, mainCat) => {
+      const mainCatTotal = state.diffItems.filter(i => i.category === mainCat).length;
+      if (subMap.size > 0) {
+        html += `<optgroup label="📁 ${escapeHtml(mainCat)}">`;
+        html += `<option value="main:${escapeHtml(mainCat)}">Все в «${escapeHtml(mainCat)}» (${mainCatTotal})</option>`;
+        subMap.forEach((count, subCat) => {
+          html += `<option value="sub:${escapeHtml(mainCat)}|${escapeHtml(subCat)}">&nbsp;&nbsp;↳ ${escapeHtml(subCat)} (${count})</option>`;
+        });
+        html += `</optgroup>`;
+      } else {
+        html += `<option value="main:${escapeHtml(mainCat)}">📁 ${escapeHtml(mainCat)} (${mainCatTotal})</option>`;
+      }
+    });
+
+    dom.groupFilterSelect.innerHTML = html;
+
+    // Восстанавливаем выбранное значение или сбрасываем в 'all'
+    const optionExists = Array.from(dom.groupFilterSelect.options).some(opt => opt.value === state.groupFilter);
+    if (optionExists) {
+      dom.groupFilterSelect.value = state.groupFilter;
+    } else {
+      state.groupFilter = 'all';
+      dom.groupFilterSelect.value = 'all';
+    }
+  }
+
+  function escapeHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   // ==========================================================================
   // РЕНДЕР ТАБЛИЦЫ РЕЗУЛЬТАТОВ
   // ==========================================================================
@@ -940,6 +1054,17 @@
       items = items.filter(i => i.packageType === 'draft');
     } else if (state.subFilter === 'bottle') {
       items = items.filter(i => i.packageType !== 'draft');
+    }
+
+    // 1.2. Фильтрация по разделу / пивоварне из файла
+    if (state.groupFilter && state.groupFilter !== 'all') {
+      if (state.groupFilter.startsWith('main:')) {
+        const targetMain = state.groupFilter.slice(5);
+        items = items.filter(i => i.category === targetMain);
+      } else if (state.groupFilter.startsWith('sub:')) {
+        const [targetMain, targetSub] = state.groupFilter.slice(4).split('|');
+        items = items.filter(i => i.category === targetMain && i.subCategory === targetSub);
+      }
     }
 
     // 2. Поиск по строке (наименование или артикул)
@@ -997,7 +1122,7 @@
       tdCode.textContent = item.code || '—';
       tr.appendChild(tdCode);
 
-      // 3. Наименование + маркер тары + мобильный 2-й ярус (статус + тара + артикул)
+      // 3. Наименование + маркер тары + бейдж категории + мобильный 2-й ярус (статус + тара + артикул)
       const tdName = document.createElement('td');
       tdName.className = 'col-name';
 
@@ -1012,14 +1137,20 @@
         pkgBadge = `<span class="package-badge package-other" title="Фасованный товар">${item.packageIcon || '📦'} ${item.packageLabel}</span>`;
       }
 
+      const groupTag = item.subCategory
+        ? `<span class="item-category-tag" title="Раздел: ${escapeHtml(item.category || '')} / ${escapeHtml(item.subCategory)}">${escapeHtml(item.subCategory)}</span>`
+        : (item.category ? `<span class="item-category-tag" title="Раздел: ${escapeHtml(item.category)}">${escapeHtml(item.category)}</span>` : '');
+
       tdName.innerHTML = `
         <div class="product-name-row">
           <span class="product-name">${item.name}</span>
           ${pkgBadge}
+          ${groupTag}
         </div>
         <div class="mobile-item-meta">
           <span class="status-badge badge-${item.status}">${item.statusLabel}</span>
           ${pkgBadge}
+          ${groupTag}
           ${item.code ? `<span class="mobile-sku">Арт: ${item.code}</span>` : ''}
         </div>
       `;
@@ -1204,6 +1335,9 @@
       state.currentSheetData = [];
       state.currentFileName = '';
       state.diffItems = [];
+      state.groupFilter = 'all';
+      state.subFilter = 'all';
+      if (dom.groupFilterContainer) dom.groupFilterContainer.style.display = 'none';
       dom.fileInput.value = '';
 
       if (sup && sup.mapping) {
@@ -1246,6 +1380,16 @@
       items = items.filter(i => i.packageType !== 'draft');
     }
 
+    if (state.groupFilter && state.groupFilter !== 'all') {
+      if (state.groupFilter.startsWith('main:')) {
+        const targetMain = state.groupFilter.slice(5);
+        items = items.filter(i => i.category === targetMain);
+      } else if (state.groupFilter.startsWith('sub:')) {
+        const [targetMain, targetSub] = state.groupFilter.slice(4).split('|');
+        items = items.filter(i => i.category === targetMain && i.subCategory === targetSub);
+      }
+    }
+
     if (state.searchQuery) {
       const q = state.searchQuery.toLowerCase();
       items = items.filter(i =>
@@ -1275,6 +1419,8 @@
       return {
         'Статус': item.statusLabel,
         'Тара': item.packageLabel || '',
+        'Раздел': item.category || '',
+        'Подраздел / Бренд': item.subCategory || '',
         'Артикул': item.code || '',
         'Наименование': item.name,
         'Остаток было': item.prevStock,
@@ -1303,13 +1449,15 @@
     }
 
     // Формируем TSV (табуляция), который идеально вставляется в Excel и Google Sheets
-    const headers = ['Статус', 'Тара', 'Артикул', 'Наименование', 'Было', 'Стало', 'Изменение', 'Изм %'];
+    const headers = ['Статус', 'Тара', 'Раздел', 'Подраздел', 'Артикул', 'Наименование', 'Было', 'Стало', 'Изменение', 'Изм %'];
     const lines = [headers.join('\t')];
 
     items.forEach(item => {
       const parts = [
         item.statusLabel,
         item.packageLabel || '',
+        item.category || '',
+        item.subCategory || '',
         item.code || '',
         item.name,
         item.prevStock,
@@ -1812,8 +1960,28 @@
       });
     });
 
-    // Добавление поставщика
-    dom.btnAddSupplier.addEventListener('click', openAddSupplierModal);
+    // Меню управления поставщиками
+    if (dom.btnSupplierMenuToggle) {
+      dom.btnSupplierMenuToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleSupplierDropdown();
+      });
+    }
+    if (dom.btnMenuAddSupplier) {
+      dom.btnMenuAddSupplier.addEventListener('click', () => {
+        closeSupplierDropdown();
+        openAddSupplierModal();
+      });
+    }
+    if (dom.btnMenuDeleteSupplier) {
+      dom.btnMenuDeleteSupplier.addEventListener('click', () => {
+        closeSupplierDropdown();
+        const activeSup = state.suppliers.find(s => s.id === state.activeSupplierId);
+        if (activeSup && state.suppliers.length > 1) {
+          deleteSupplier(activeSup);
+        }
+      });
+    }
     dom.btnSaveSupplier.addEventListener('click', saveSupplierFromModal);
 
     // Drag & Drop
@@ -1849,10 +2017,21 @@
       }
     });
 
-    // Пороги
-    dom.threshGrowthPct.addEventListener('input', onThresholdChange);
-    dom.threshGrowthQty.addEventListener('input', onThresholdChange);
-    dom.threshLowQty.addEventListener('input', onThresholdChange);
+    // Пороги: сворачивание/разворачивание
+    if (dom.thresholdsHeader) {
+      dom.thresholdsHeader.addEventListener('click', () => {
+        if (dom.thresholdsCard) dom.thresholdsCard.classList.toggle('expanded');
+      });
+    }
+
+    const handleThresholdInput = (e) => {
+      onThresholdChange(e);
+      updateThresholdsSummary();
+    };
+    dom.threshGrowthPct.addEventListener('input', handleThresholdInput);
+    dom.threshGrowthQty.addEventListener('input', handleThresholdInput);
+    dom.threshLowQty.addEventListener('input', handleThresholdInput);
+    updateThresholdsSummary();
 
     // Вкладки-фильтры
     dom.filterTabs.forEach(tab => {
@@ -1875,6 +2054,15 @@
           state.subFilter = tab.dataset.subFilter;
           renderTable();
         });
+      });
+    }
+
+    // Выпадающий список групп / пивоварен из файла
+    if (dom.groupFilterSelect) {
+      dom.groupFilterSelect.addEventListener('change', (e) => {
+        state.groupFilter = e.target.value;
+        updateSubFilterBadges();
+        renderTable();
       });
     }
 
@@ -1923,6 +2111,7 @@
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.dropdown-container')) {
         closeExportDropdown();
+        closeSupplierDropdown();
       }
     });
 
