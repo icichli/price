@@ -359,10 +359,17 @@
 
   function updateBaselineInfo() {
     const sup = state.suppliers.find(s => s.id === state.activeSupplierId);
-    const hasData = state.baselineSnapshot && state.baselineSnapshot.current && state.baselineSnapshot.current.length > 0;
-    const dateStr = (state.baselineSnapshot && state.baselineSnapshot.updatedAt)
-      ? new Date(state.baselineSnapshot.updatedAt).toLocaleString('ru-RU')
-      : 'нет данных';
+    const hasData = Boolean(state.baselineSnapshot && state.baselineSnapshot.current && state.baselineSnapshot.current.length > 0);
+    
+    let dateStr = 'нет данных';
+    if (state.baselineSnapshot && state.baselineSnapshot.updatedAt) {
+      try {
+        const d = new Date(state.baselineSnapshot.updatedAt);
+        if (!isNaN(d.getTime())) {
+          dateStr = d.toLocaleString('ru-RU');
+        }
+      } catch (e) {}
+    }
 
     const count = hasData ? state.baselineSnapshot.current.length : 0;
     const infoText = hasData ? `База: ${count} поз. (от ${dateStr})` : 'База: пустая (нет данных)';
@@ -657,8 +664,8 @@
         stockDeltaPct = 100;
       }
 
-      const prevPrice = prev ? prev.price : null;
-      const currPrice = curr.price;
+      const prevPrice = (prev && typeof prev.price === 'number' && !isNaN(prev.price)) ? prev.price : null;
+      const currPrice = (curr && typeof curr.price === 'number' && !isNaN(curr.price)) ? curr.price : null;
       const priceDelta = (currPrice !== null && prevPrice !== null)
         ? Math.round((currPrice - prevPrice) * 100) / 100
         : null;
@@ -758,9 +765,15 @@
     dom.loadedFileName.textContent = lastFileName;
     dom.loadedFileStats.textContent = `Приход: ${itemCount} поз. (в облаке)`;
 
-    const dateStr = state.baselineSnapshot.updatedAt
-      ? new Date(state.baselineSnapshot.updatedAt).toLocaleString('ru-RU')
-      : '';
+    let dateStr = '';
+    if (state.baselineSnapshot && state.baselineSnapshot.updatedAt) {
+      try {
+        const d = new Date(state.baselineSnapshot.updatedAt);
+        if (!isNaN(d.getTime())) {
+          dateStr = d.toLocaleString('ru-RU');
+        }
+      } catch (e) {}
+    }
     dom.loadedFileBaseline.textContent = dateStr ? `Зафиксировано: ${dateStr}` : 'В облачной базе';
 
     dom.btnCommitSnapshot.disabled = true;
@@ -911,16 +924,19 @@
       tdPrice.className = 'col-price';
       tdPrice.style.textAlign = 'right';
 
-      if (item.currPrice !== null) {
+      const hasCurrPrice = typeof item.currPrice === 'number' && !isNaN(item.currPrice);
+      const hasPrevPrice = typeof item.prevPrice === 'number' && !isNaN(item.prevPrice);
+
+      if (hasCurrPrice) {
         let priceHtml = `<div class="price-val">${item.currPrice.toLocaleString('ru-RU')} ₽</div>`;
-        if (item.priceDelta !== null && item.priceDelta !== 0) {
+        if (typeof item.priceDelta === 'number' && !isNaN(item.priceDelta) && item.priceDelta !== 0) {
           const pSign = item.priceDelta > 0 ? '+' : '';
           const pClass = item.priceDelta > 0 ? 'delta-negative' : 'delta-positive';
           priceHtml += `<div class="delta-val ${pClass}" style="font-size:11px;">${pSign}${item.priceDelta} ₽</div>`;
         }
         tdPrice.innerHTML = priceHtml;
-      } else if (item.prevPrice !== null) {
-        tdPrice.innerHTML = `<span style="text-decoration:line-through;color:var(--text-muted);">${item.prevPrice} ₽</span>`;
+      } else if (hasPrevPrice) {
+        tdPrice.innerHTML = `<span style="text-decoration:line-through;color:var(--text-muted);">${item.prevPrice.toLocaleString('ru-RU')} ₽</span>`;
       } else {
         tdPrice.textContent = '—';
       }
@@ -1397,8 +1413,8 @@
       dom.btnSyncCloudNow.disabled = true;
       showCloudTestNotice('Запрос свежей базы из Google Таблицы...', 'info');
 
-      const res = await window.PriceStorage.syncFromCloud();
-      if (res.hasUpdates) {
+      const res = await window.PriceStorage.syncFromCloud(true);
+      if (res.hasUpdates || (res.suppliers && res.suppliers.length > 0)) {
         showCloudTestNotice('База обновлена из облака!', 'success');
         state.suppliers = await window.PriceStorage.getAllSuppliers();
         renderSupplierTabs();
@@ -1520,8 +1536,13 @@
       closePinPromptModal();
       showToast('PIN подтвержден! Облако успешно подключено', 'success');
 
-      // 4. Запускаем синхронизацию остатков из Google Таблицы
-      await backgroundCloudSync();
+      // 4. Запускаем принудительную синхронизацию остатков из Google Таблицы
+      const res = await window.PriceStorage.syncFromCloud(true);
+      if (res.hasUpdates || (res.suppliers && res.suppliers.length > 0)) {
+        state.suppliers = await window.PriceStorage.getAllSuppliers();
+        renderSupplierTabs();
+        await loadActiveSupplierSnapshot();
+      }
 
     } catch (err) {
       console.error('PIN verification error:', err);

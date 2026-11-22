@@ -56,8 +56,8 @@ class StorageManager {
     const suppliers = await this.getAllSuppliers();
     if (!suppliers || suppliers.length === 0) {
       const defaultSuppliers = [
-        { id: 'supplier_1', name: 'ПП', order: 0, mapping: null, updatedAt: new Date().toISOString() },
-        { id: 'supplier_2', name: 'Бир и Ко', order: 1, mapping: null, updatedAt: new Date().toISOString() }
+        { id: 'supplier_1', name: 'ПП', order: 0, mapping: null, updatedAt: null },
+        { id: 'supplier_2', name: 'Бир и Ко', order: 1, mapping: null, updatedAt: null }
       ];
 
       for (const sup of defaultSuppliers) {
@@ -66,7 +66,7 @@ class StorageManager {
           supplierId: sup.id,
           current: [],
           previous: [],
-          updatedAt: sup.updatedAt
+          updatedAt: null
         });
       }
     } else {
@@ -398,8 +398,9 @@ class StorageManager {
 
   /**
    * Фоновый запрос свежей базы из Google Apps Script (GET)
+   * @param {boolean} force - принудительное обновление локальной базы данными из облака
    */
-  async syncFromCloud() {
+  async syncFromCloud(force = false) {
     const { url, token } = this.getCloudConfig();
     if (!url || !token) {
       this._notifyStatus('unconfigured', 'Облако не настроено');
@@ -434,10 +435,21 @@ class StorageManager {
         const localSnap = await this.getSnapshotRecord(remote.id);
 
         const remoteTime = remote.updatedAt ? new Date(remote.updatedAt).getTime() : 0;
-        const localTime = localSnap.updatedAt ? new Date(localSnap.updatedAt).getTime() : 0;
+        const localTime = (localSnap && localSnap.updatedAt) ? new Date(localSnap.updatedAt).getTime() : 0;
+        const localHasData = Boolean(localSnap && localSnap.current && localSnap.current.length > 0);
+        const remoteHasData = Boolean(remote.currentSnapshot && remote.currentSnapshot.length > 0);
 
-        // Если в облаке снимок новее, чем локально
-        if (remoteTime > localTime || !localSup) {
+        // Обновляем локальную базу, если:
+        // 1. Принудительная синхронизация (force: true)
+        // 2. В облаке есть данные, а локально база пустая (устраняет рассинхрон при открытии на новом устройстве)
+        // 3. В облаке снимок новее, чем локально
+        // 4. Поставщик еще не создан локально
+        const shouldUpdate = force ||
+          (!localHasData && remoteHasData) ||
+          (remoteTime > localTime) ||
+          !localSup;
+
+        if (shouldUpdate) {
           hasUpdates = true;
 
           // Сохраняем/обновляем поставщика
@@ -659,20 +671,14 @@ class StorageManager {
     return items.map(item => {
       const clean = {
         name: String(item.name || '').trim(),
-        stock: typeof item.stock === 'number' ? item.stock : (parseFloat(item.stock) || 0)
+        stock: typeof item.stock === 'number' ? item.stock : (parseFloat(item.stock) || 0),
+        code: item.code ? String(item.code).trim() : '',
+        price: (item.price !== null && item.price !== undefined && item.price !== '')
+          ? (typeof item.price === 'number' ? item.price : (parseFloat(item.price) || null))
+          : null,
+        isTextStock: Boolean(item.isTextStock),
+        textStockNote: item.textStockNote ? String(item.textStockNote).trim() : ''
       };
-      if (item.code && String(item.code).trim()) {
-        clean.code = String(item.code).trim();
-      }
-      if (item.price !== null && item.price !== undefined && item.price !== '') {
-        clean.price = typeof item.price === 'number' ? item.price : parseFloat(item.price);
-      }
-      if (item.isTextStock) {
-        clean.isTextStock = true;
-      }
-      if (item.textStockNote) {
-        clean.textStockNote = String(item.textStockNote).trim();
-      }
       return clean;
     });
   }
@@ -685,7 +691,7 @@ class StorageManager {
         return [i.name, i.stock];
       }
       // 2. Кортеж с доп. полями: [name, stock, code, price, isTextStock, textStockNote]
-      const arr = [i.name, i.stock, i.code || '', i.price !== null && i.price !== undefined ? i.price : null];
+      const arr = [i.name, i.stock, i.code || '', (typeof i.price === 'number' && !isNaN(i.price)) ? i.price : null];
       if (i.isTextStock) {
         arr.push(1);
         arr.push(i.textStockNote || '');
@@ -702,7 +708,9 @@ class StorageManager {
           name: i[0] || '',
           stock: typeof i[1] === 'number' ? i[1] : (parseFloat(i[1]) || 0),
           code: i[2] || '',
-          price: i[3] !== undefined && i[3] !== null ? (typeof i[3] === 'number' ? i[3] : parseFloat(i[3])) : null,
+          price: (i[3] !== undefined && i[3] !== null && i[3] !== '')
+            ? (typeof i[3] === 'number' ? i[3] : (parseFloat(i[3]) || null))
+            : null,
           isTextStock: i[4] === 1,
           textStockNote: i[5] || ''
         };
@@ -711,7 +719,9 @@ class StorageManager {
         name: i.name || '',
         stock: typeof i.stock === 'number' ? i.stock : (parseFloat(i.stock) || 0),
         code: i.code || '',
-        price: i.price !== undefined && i.price !== null ? (typeof i.price === 'number' ? i.price : parseFloat(i.price)) : null,
+        price: (i.price !== undefined && i.price !== null && i.price !== '')
+          ? (typeof i.price === 'number' ? i.price : (parseFloat(i.price) || null))
+          : null,
         isTextStock: Boolean(i.isTextStock),
         textStockNote: i.textStockNote || ''
       };
