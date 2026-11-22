@@ -14,7 +14,7 @@
   <!-- Фавиконка (SVG Data URI без дополнительных сетевых обращений) -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><line x1='18' y1='20' x2='18' y2='10'></line><line x1='12' y1='20' x2='12' y2='4'></line><line x1='6' y1='20' x2='6' y2='14'></line></svg>">
 
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=1.2.0">
   <!-- SheetJS CDN: defer предотвращает блокировку первичной отрисовки DOM -->
   <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -424,11 +424,11 @@
         <button type="button" id="btnClearPin" class="btn btn-secondary" style="color: var(--danger-text); border-color: var(--danger-border); margin-right: auto;" title="Сбросить сохраненный PIN">
           <span>Сбросить PIN</span>
         </button>
-        <button id="btnTestCloudConnection" class="btn btn-secondary">
-          <span>Проверить подключение</span>
+        <button id="btnPushCloudNow" class="btn btn-secondary" title="Отправить текущую локальную базу поставщика в Google Таблицу">
+          <span>Выгрузить в облако ⬆</span>
         </button>
-        <button id="btnSyncCloudNow" class="btn btn-secondary">
-          <span>Синхронизировать сейчас</span>
+        <button id="btnSyncCloudNow" class="btn btn-secondary" title="Загрузить свежую базу из Google Таблицы">
+          <span>Синхронизировать сейчас ⬇</span>
         </button>
         <button id="btnSaveCloudSettings" class="btn btn-primary">
           <span>Сохранить</span>
@@ -517,9 +517,9 @@
   <!-- КОНТЕЙНЕР ДЛЯ ВСПЛЫВАЮЩИХ УВЕДОМЛЕНИЙ (TOAST) -->
   <div id="toastContainer" class="toast-container"></div>
 
-  <!-- СКРИПТЫ ПРИЛОЖЕНИЯ (defer для параллельной загрузки без задержки рендера) -->
-  <script defer src="storage.js"></script>
-  <script defer src="parser.js"></script>
-  <script defer src="app.js"></script>
+  <!-- СКРИПТЫ ПРИЛОЖЕНИЯ (с версионированием для предотвращения кеширования на мобильных) -->
+  <script defer src="storage.js?v=1.2.0"></script>
+  <script defer src="parser.js?v=1.2.0"></script>
+  <script defer src="app.js?v=1.2.0"></script>
 </body>
 </html>

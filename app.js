@@ -119,6 +119,7 @@
     cloudPinInput: document.getElementById('cloudPinInput'),
     cloudTestResult: document.getElementById('cloudTestResult'),
     btnTestCloudConnection: document.getElementById('btnTestCloudConnection'),
+    btnPushCloudNow: document.getElementById('btnPushCloudNow'),
     btnSyncCloudNow: document.getElementById('btnSyncCloudNow'),
     btnSaveCloudSettings: document.getElementById('btnSaveCloudSettings'),
     btnClearPin: document.getElementById('btnClearPin'),
@@ -302,6 +303,11 @@
     // Сброс загруженного файла для нового поставщика
     resetCurrentFile();
     await loadActiveSupplierSnapshot();
+
+    // Фоновая проверка обновлений поставщика из облака
+    if (window.PriceStorage.hasAuthenticatedPin()) {
+      backgroundCloudSync();
+    }
   }
 
   async function loadActiveSupplierSnapshot() {
@@ -1008,8 +1014,12 @@
       dom.fileInput.value = '';
 
       // Пересчитываем diff: теперь он показывает разницу между только что принятым приходом и previous!
-      recomputeDiff();
-      renderTable();
+      try {
+        recomputeDiff();
+        renderTable();
+      } catch (renderErr) {
+        console.error('Render error after commit:', renderErr);
+      }
 
     } catch (err) {
       showToast('Ошибка при фиксации базы: ' + err.message, 'error');
@@ -1398,6 +1408,40 @@
     }
   }
 
+  async function pushCloudNow() {
+    const url = dom.cloudUrlInput.value.trim();
+    const token = dom.cloudPinInput.value.trim();
+
+    if (!url || !token) {
+      showCloudTestNotice('Сначала сохраните настройки подключения', 'error');
+      return;
+    }
+
+    if (!state.activeSupplierId) {
+      showCloudTestNotice('Выберите поставщика для выгрузки', 'error');
+      return;
+    }
+
+    window.PriceStorage.setCloudConfig(url, token);
+
+    try {
+      if (dom.btnPushCloudNow) dom.btnPushCloudNow.disabled = true;
+      showCloudTestNotice('Выгрузка локальной базы в Google Таблицу...', 'info');
+
+      const res = await window.PriceStorage.pushLocalSnapshotToCloud(state.activeSupplierId);
+      if (res && res.success) {
+        showCloudTestNotice('Локальная база успешно выгружена в Google Таблицу!', 'success');
+        showToast('База поставщика успешно сохранена в Google Sheets!', 'success');
+      } else {
+        showCloudTestNotice('Ошибка выгрузки: ' + (res ? res.error : 'неизвестно'), 'error');
+      }
+    } catch (err) {
+      showCloudTestNotice('Ошибка выгрузки в облако: ' + err.message, 'error');
+    } finally {
+      if (dom.btnPushCloudNow) dom.btnPushCloudNow.disabled = false;
+    }
+  }
+
   async function syncCloudNow() {
     const url = dom.cloudUrlInput.value.trim();
     const token = dom.cloudPinInput.value.trim();
@@ -1448,12 +1492,12 @@
     dom.cloudTestResult.style.display = 'block';
   }
 
-  async function backgroundCloudSync() {
+  async function backgroundCloudSync(force = false) {
     const { url, token } = window.PriceStorage.getCloudConfig();
     if (!url || !token) return;
 
     try {
-      const res = await window.PriceStorage.syncFromCloud();
+      const res = await window.PriceStorage.syncFromCloud(force);
       if (res.hasUpdates) {
         state.suppliers = await window.PriceStorage.getAllSuppliers();
         renderSupplierTabs();
@@ -1765,9 +1809,30 @@
     });
 
     // Настройки облака
-    dom.btnTestCloudConnection.addEventListener('click', testCloudConnection);
-    dom.btnSyncCloudNow.addEventListener('click', syncCloudNow);
-    dom.btnSaveCloudSettings.addEventListener('click', saveCloudSettings);
+    if (dom.btnTestCloudConnection) dom.btnTestCloudConnection.addEventListener('click', testCloudConnection);
+    if (dom.btnPushCloudNow) dom.btnPushCloudNow.addEventListener('click', pushCloudNow);
+    if (dom.btnSyncCloudNow) dom.btnSyncCloudNow.addEventListener('click', syncCloudNow);
+    if (dom.btnSaveCloudSettings) dom.btnSaveCloudSettings.addEventListener('click', saveCloudSettings);
+
+    // Автоматическая периодическая синхронизация (каждые 30 сек при активной вкладке)
+    setInterval(() => {
+      if (document.visibilityState === 'visible' && window.PriceStorage.hasAuthenticatedPin()) {
+        backgroundCloudSync();
+      }
+    }, 30000);
+
+    // Синхронизация при возвращении на вкладку (переключение между браузером и другими окнами/приложениями)
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && window.PriceStorage.hasAuthenticatedPin()) {
+        backgroundCloudSync();
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      if (window.PriceStorage.hasAuthenticatedPin()) {
+        backgroundCloudSync();
+      }
+    });
 
     // Настройка маппинга
     dom.sheetSelector.addEventListener('change', onSheetChange);

@@ -342,8 +342,9 @@ function doPost(e) {
         }
       }
       
+      const nowIso = new Date().toISOString();
       if (targetRowIndex > 0) {
-        sheet.getRange(targetRowIndex, 3).setValue('');
+        sheet.getRange(targetRowIndex, 3).setValue(nowIso);
         setCellSafe(sheet, targetRowIndex, 5, '[]');
         setCellSafe(sheet, targetRowIndex, 6, '[]');
         
@@ -359,6 +360,7 @@ function doPost(e) {
       
       return createJsonResponse({
         success: true,
+        updatedAt: nowIso,
         message: 'База остатков поставщика успешно очищена в Google Sheets'
       });
     }

@@ -223,18 +223,19 @@ class StorageManager {
    * Локальная очистка снимка остатков поставщика (сброс текущих и предыдущих остатков)
    */
   async clearLocalSnapshot(supplierId) {
+    const nowIso = new Date().toISOString();
     const emptyRecord = {
       supplierId: supplierId,
       current: [],
       previous: [],
-      updatedAt: null
+      updatedAt: nowIso
     };
 
     await this.saveSnapshotRecord(emptyRecord);
 
     const supplier = await this.getSupplier(supplierId);
     if (supplier) {
-      supplier.updatedAt = null;
+      supplier.updatedAt = nowIso;
       if (supplier.mapping) {
         delete supplier.mapping.lastFileName;
         delete supplier.mapping.lastCommitTime;
@@ -439,10 +440,28 @@ class StorageManager {
         const localHasData = Boolean(localSnap && localSnap.current && localSnap.current.length > 0);
         const remoteHasData = Boolean(remote.currentSnapshot && remote.currentSnapshot.length > 0);
 
-        // Обновляем локальную базу, если:
+        // 1. Автоматическая синхронизация локальной базы в облако:
+        // Если локально есть база, а в облаке пусто или локальный снимок новее облачного
+        // (например, на телефоне зафиксировали базу, но из-за сбоя сети она осталась только локально) —
+        // отправляем локальную базу в облако, чтобы другие устройства ее получили!
+        if (!force && localHasData && (localTime > remoteTime || (!remoteHasData && remoteTime === 0))) {
+          try {
+            await this.syncSnapshotToCloud(
+              remote.id,
+              localSup ? localSup.name : remote.name,
+              localSup ? localSup.mapping : remote.mapping,
+              localSnap.current
+            );
+          } catch (pushErr) {
+            console.warn('Auto-push local snapshot to cloud failed:', pushErr);
+          }
+          continue;
+        }
+
+        // 2. Обновляем локальную базу, если:
         // 1. Принудительная синхронизация (force: true)
         // 2. В облаке есть данные, а локально база пустая (устраняет рассинхрон при открытии на новом устройстве)
-        // 3. В облаке снимок новее, чем локально
+        // 3. В облаке снимок новее, чем локально (включая очистку в облаке с более новым timestamp)
         // 4. Поставщик еще не создан локально
         const shouldUpdate = force ||
           (!localHasData && remoteHasData) ||
@@ -526,6 +545,23 @@ class StorageManager {
       this._notifyStatus('error', 'Ошибка облака: ' + err.message);
       throw err;
     }
+  }
+
+  /**
+   * Принудительная отправка локальной базы поставщика в Google Sheets
+   */
+  async pushLocalSnapshotToCloud(supplierId) {
+    const { url, token } = this.getCloudConfig();
+    if (!url || !token) throw new Error('Облако не настроено');
+
+    const supplier = await this.getSupplier(supplierId);
+    const snap = await this.getSnapshotRecord(supplierId);
+
+    const supName = supplier ? supplier.name : 'Поставщик';
+    const mapping = supplier ? supplier.mapping : null;
+    const items = (snap && snap.current) ? snap.current : [];
+
+    return await this.syncSnapshotToCloud(supplierId, supName, mapping, items);
   }
 
   /**
