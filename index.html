@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ПрайсКонтроль — Сравнение остатков и прайсов</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- SheetJS CDN для чтения и экспорта Excel файлов (.xlsx, .xls) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="app-wrapper">
+    
+    <!-- ШАПКА ПРИЛОЖЕНИЯ -->
+    <header class="header">
+      <div class="logo-container">
+        <div class="logo-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"></line>
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+          </svg>
+        </div>
+        <div class="logo-text">
+          <h1>ПрайсКонтроль</h1>
+          <p>Сравнение остатков и отслеживание изменений</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Бейдж статуса облачной синхронизации -->
+        <div id="cloudStatusBadge" class="cloud-status-badge unconfigured" title="Нажмите для настройки облачной синхронизации">
+          <span class="status-dot"></span>
+          <span id="cloudStatusText">Облако: Не настроено</span>
+        </div>
+
+        <!-- Кнопка настройки колонок -->
+        <button id="btnOpenMapping" class="icon-btn" title="Настроить колонки и лист" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+          </svg>
+          <span>Колонки</span>
+        </button>
+
+        <!-- Кнопка настроек облака -->
+        <button id="btnOpenCloudSettings" class="icon-btn" title="Настройки Google Apps Script">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+          </svg>
+          <span>Облако</span>
+        </button>
+
+        <!-- Переключатель темы (Темная / Светлая) -->
+        <button id="btnThemeToggle" class="icon-btn icon-only" title="Сменить тему оформления">
+          <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ВКЛАДКИ ПОСТАВЩИКОВ -->
+    <nav class="suppliers-bar">
+      <div id="supplierTabsContainer" class="suppliers-tabs">
+        <!-- Вкладки поставщиков генерируются через JS -->
+      </div>
+      <button id="btnAddSupplier" class="tab-add-btn" title="Добавить нового поставщика">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        <span>Поставщик</span>
+      </button>
+    </nav>
+
+    <!-- СЕКЦИЯ ЗАГРУЗКИ ФАЙЛА И ПРЕДПРОСМОТРА -->
+    <section class="upload-section">
+      <!-- Зона Drag & Drop -->
+      <div id="dropzone" class="dropzone">
+        <div class="dropzone-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+        </div>
+        <div class="dropzone-title">Перетащите сюда свежий прайс (.xlsx, .xls)</div>
+        <div class="dropzone-desc">или нажмите для выбора файла на устройстве</div>
+        <input type="file" id="fileInput" class="file-input" accept=".xlsx, .xls">
+      </div>
+
+      <!-- Карточка загруженного файла -->
+      <div id="fileCard" class="file-card">
+        <div class="file-meta">
+          <div class="file-name-badge">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span id="loadedFileName">price.xlsx</span>
+          </div>
+          <span id="loadedFileStats" class="file-stats-badge">Лист: Лист1 | 0 строк</span>
+          <span id="loadedFileBaseline" class="file-stats-badge">База: Не сохранена</span>
+        </div>
+        <div class="file-actions">
+          <button id="btnTuneColumns" class="btn btn-secondary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>Настроить колонки</span>
+          </button>
+          <button id="btnChangeFile" class="btn btn-secondary">
+            <span>Сменить файл</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ПАНЕЛЬ ПОРОГОВЫХ ЗНАЧЕНИЙ -->
+    <div class="controls-card">
+      <div class="thresholds-group">
+        <strong style="font-size: 13px; color: var(--text-primary);">Пороги фильтрации:</strong>
+        <div class="threshold-item">
+          <label for="threshGrowthPct">Рост от %:</label>
+          <input type="number" id="threshGrowthPct" class="threshold-input" value="50" min="1" max="1000">
+        </div>
+        <div class="threshold-item">
+          <label for="threshGrowthQty">ИЛИ от ед.:</label>
+          <input type="number" id="threshGrowthQty" class="threshold-input" value="10" min="1" max="10000">
+        </div>
+        <div class="threshold-item">
+          <label for="threshLowQty">Меньше ед. (мало):</label>
+          <input type="number" id="threshLowQty" class="threshold-input" value="5" min="0" max="10000">
+        </div>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted);">
+        Пересчет происходит мгновенно без перезагрузки файла
+      </div>
+    </div>
+
+    <!-- ТУЛБАР: ВКЛАДКИ-ФИЛЬТРЫ, ПОИСК И ДЕЙСТВИЯ -->
+    <section class="toolbar-section">
+      <!-- Вкладки-фильтры -->
+      <div class="filter-tabs-row">
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-filter="all">
+            <span>Все позиции</span>
+            <span class="tab-badge" id="badgeAll">0</span>
+          </button>
+          <button class="filter-tab" data-filter="new">
+            <span>Новинки</span>
+            <span class="tab-badge" id="badgeNew">0</span>
+          </button>
+          <button class="filter-tab" data-filter="growth">
+            <span>Поступление / Рост</span>
+            <span class="tab-badge" id="badgeGrowth">0</span>
+          </button>
+          <button class="filter-tab" data-filter="drop">
+            <span>Падение / Мало</span>
+            <span class="tab-badge" id="badgeDrop">0</span>
+          </button>
+          <button class="filter-tab" data-filter="out">
+            <span>Выбыло (0)</span>
+            <span class="tab-badge" id="badgeOut">0</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Строка поиска и ключевые кнопки действий -->
+      <div class="actions-row">
+        <div class="search-box">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="searchInput" class="search-input" placeholder="Поиск по названию или артикулу...">
+        </div>
+
+        <div class="main-actions-group">
+          <!-- Кнопка «Принять и обновить базу» -->
+          <button id="btnCommitSnapshot" class="btn btn-success" disabled title="Зафиксировать текущий прайс как эталон в IndexedDB и отправить в Google Таблицу">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Принять и обновить базу</span>
+          </button>
+
+          <!-- Кнопка «Откатить базу» -->
+          <button id="btnRollbackSnapshot" class="btn btn-secondary" disabled title="Восстановить предыдущий снимок остатков">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            <span>Откатить базу</span>
+          </button>
+
+          <!-- Выпадающее меню «Выгрузить список» -->
+          <div class="dropdown-container">
+            <button id="btnExportMenuToggle" class="btn btn-secondary" title="Выгрузить отфильтрованные позиции">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span>Выгрузить список</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div id="exportDropdownMenu" class="dropdown-menu">
+              <button id="btnExportExcel" class="dropdown-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="8" y1="13" x2="16" y2="13"></line>
+                  <line x1="8" y1="17" x2="16" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                <span>Скачать .xlsx (Excel)</span>
+              </button>
+              <button id="btnExportClipboard" class="dropdown-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span>Скопировать в буфер</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ТАБЛИЦА РЕЗУЛЬТАТОВ -->
+    <main class="table-card">
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 130px;" class="sortable" data-sort="status">
+                Статус <span class="sort-indicator"></span>
+              </th>
+              <th style="width: 140px;" class="sortable" data-sort="code">
+                Артикул <span class="sort-indicator"></span>
+              </th>
+              <th class="sortable" data-sort="name">
+                Наименование <span class="sort-indicator"></span>
+              </th>
+              <th style="width: 90px; text-align: right;" class="sortable" data-sort="prevStock">
+                Было <span class="sort-indicator"></span>
+              </th>
+              <th style="width: 90px; text-align: right;" class="sortable" data-sort="currStock">
+                Стало <span class="sort-indicator"></span>
+              </th>
+              <th style="width: 140px; text-align: right;" class="sortable" data-sort="stockDelta">
+                Изменение <span class="sort-indicator"></span>
+              </th>
+              <th style="width: 140px; text-align: right;" class="sortable" data-sort="currPrice">
+                Цена / Дельта <span class="sort-indicator"></span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- Динамическое наполнение через JS -->
+          </tbody>
+        </table>
+
+        <!-- Пустые состояния -->
+        <div id="tableEmptyState" class="empty-state">
+          <div class="empty-state-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="12" y1="18" x2="12" y2="12"></line>
+              <line x1="9" y1="15" x2="15" y2="15"></line>
+            </svg>
+          </div>
+          <div class="empty-state-title">Загрузите файл прайса</div>
+          <div class="empty-state-desc">
+            Перетащите прайс-лист выбранного поставщика в область выше для анализа остатков и сравнения с базой
+          </div>
+        </div>
+      </div>
+
+      <div class="table-footer">
+        <span id="footerStats">Показано 0 строк</span>
+        <span id="footerBaselineInfo">База: данные отсутствуют</span>
+      </div>
+    </main>
+  </div>
+
+  <!-- ==========================================================================
+       МОДАЛЬНОЕ ОКНО: НАСТРОЙКИ ОБЛАКА (GOOGLE APPS SCRIPT)
+       ========================================================================== -->
+  <div id="modalCloudSettings" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 class="modal-title">Настройки облачной синхронизации</h2>
+        <button class="modal-close-btn" data-close-modal="modalCloudSettings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-notice info">
+          Синхронизация позволяет автоматически объединять базу эталонных остатков между вашим рабочим ПК и телефоном через Google Таблицу.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cloudUrlInput">URL веб-приложения Google Apps Script:</label>
+          <input type="url" id="cloudUrlInput" class="form-input" placeholder="https://script.google.com/macros/s/.../exec">
+          <div class="form-hint">
+            Разверните скрипт <code>Code.gs</code> как веб-приложение с доступом «Все» (Anyone) и вставьте его URL.
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cloudPinInput">Секретный PIN / Токен:</label>
+          <input type="text" id="cloudPinInput" class="form-input" placeholder="Например: 7788 или мой_секрет">
+          <div class="form-hint">
+            Защищает вашу таблицу от посторонних обращений. Должен совпадать на всех ваших устройствах.
+          </div>
+        </div>
+
+        <div id="cloudTestResult" class="modal-notice" style="display: none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="btnTestCloudConnection" class="btn btn-secondary">
+          <span>Проверить подключение</span>
+        </button>
+        <button id="btnSyncCloudNow" class="btn btn-secondary">
+          <span>Синхронизировать сейчас</span>
+        </button>
+        <button id="btnSaveCloudSettings" class="btn btn-primary">
+          <span>Сохранить</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       МОДАЛЬНОЕ ОКНО: НАСТРОЙКА КОЛОНОК И ПРЕДПРОСМОТР ЛИСТА
+       ========================================================================== -->
+  <div id="modalColumnMapping" class="modal-overlay">
+    <div class="modal-card modal-large">
+      <div class="modal-header">
+        <h2 class="modal-title">Настройка колонок и предпросмотр листа</h2>
+        <button class="modal-close-btn" data-close-modal="modalColumnMapping">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div class="form-group">
+            <label class="form-label" for="sheetSelector">Лист книги Excel:</label>
+            <select id="sheetSelector" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="headerRowSelector">Номер строки заголовков:</label>
+            <select id="headerRowSelector" class="form-select"></select>
+          </div>
+        </div>
+
+        <div class="modal-notice info">
+          Выберите назначения столбцов в выпадающих списках над таблицей. Обязательными являются <strong>«Наименование»</strong> и <strong>«Остаток»</strong>.
+        </div>
+
+        <div class="preview-table-container">
+          <table class="preview-table">
+            <thead id="previewTableHead">
+              <!-- Селекторы колонок формируются динамически -->
+            </thead>
+            <tbody id="previewTableBody">
+              <!-- Первые 10 строк листа -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal="modalColumnMapping">Отмена</button>
+        <button id="btnApplyMapping" class="btn btn-primary">Применить и сохранить маппинг</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================================================
+       МОДАЛЬНОЕ ОКНО: ДОБАВЛЕНИЕ / ПЕРЕИМЕНОВАНИЕ ПОСТАВЩИКА
+       ========================================================================== -->
+  <div id="modalSupplier" class="modal-overlay">
+    <div class="modal-card" style="max-width: 420px;">
+      <div class="modal-header">
+        <h2 id="modalSupplierTitle" class="modal-title">Поставщик</h2>
+        <button class="modal-close-btn" data-close-modal="modalSupplier">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="supplierNameInput">Название поставщика:</label>
+          <input type="text" id="supplierNameInput" class="form-input" placeholder="Например: Поставщик Напитков">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-close-modal="modalSupplier">Отмена</button>
+        <button id="btnSaveSupplier" class="btn btn-primary">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- КОНТЕЙНЕР ДЛЯ ВСПЛЫВАЮЩИХ УВЕДОМЛЕНИЙ (TOAST) -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- СКРИПТЫ ПРИЛОЖЕНИЯ -->
+  <script src="storage.js"></script>
+  <script src="parser.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
