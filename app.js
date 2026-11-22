@@ -126,6 +126,8 @@
     btnExportClipboard: document.getElementById('btnExportClipboard'),
 
     // Таблица
+    tableCard: document.querySelector('.table-card'),
+    tableWrapper: document.querySelector('.table-wrapper'),
     tableBody: document.getElementById('tableBody'),
     tableEmptyState: document.getElementById('tableEmptyState'),
     tableHeaders: document.querySelectorAll('.data-table th.sortable'),
@@ -1986,6 +1988,177 @@
   }
 
   // ==========================================================================
+  // СВАЙП-НАВИГАЦИЯ И ФИЛЬТРЫ (SWIPE & FILTER NAVIGATION)
+  // ==========================================================================
+  const FILTER_ORDER = ['all', 'new', 'growth', 'drop', 'out'];
+
+  /**
+   * Активация фильтра с синхронизацией UI и опциональной анимацией сдвига
+   * @param {string} filterName - 'all' | 'new' | 'growth' | 'drop' | 'out'
+   * @param {number} direction - 0 (клик), 1 (свайп влево/следующий), -1 (свайп вправо/предыдущий)
+   */
+  function setActiveFilter(filterName, direction = 0) {
+    if (!FILTER_ORDER.includes(filterName)) return;
+
+    state.activeFilter = filterName;
+    state.subFilter = 'all'; // сброс в "Все форматы", чтобы сразу видеть полный срез новой вкладки
+
+    // Подсветка активной вкладки и ее автопрокрутка в центр экрана на мобильных устройствах
+    dom.filterTabs.forEach(t => {
+      const isActive = t.dataset.filter === filterName;
+      t.classList.toggle('active', isActive);
+      if (isActive) {
+        t.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    });
+
+    renderGroupChips(); // обновляет счетчики на чипсах категорий
+    updateSubFilterBadges();
+
+    // Сброс вертикального скролла таблицы к верху списка при смене фильтра
+    if (dom.tableWrapper) {
+      dom.tableWrapper.scrollTop = 0;
+    }
+
+    // Анимация плавного сдвига контента при свайпе
+    if (direction !== 0 && dom.tableWrapper) {
+      const animClass = direction > 0 ? 'swipe-slide-left' : 'swipe-slide-right';
+      dom.tableWrapper.classList.remove('swipe-slide-left', 'swipe-slide-right', 'swipe-bounce-left', 'swipe-bounce-right');
+      void dom.tableWrapper.offsetWidth; // принудительный reflow для перезапуска CSS-анимации
+      dom.tableWrapper.classList.add(animClass);
+      setTimeout(() => {
+        dom.tableWrapper.classList.remove(animClass);
+      }, 250);
+    }
+
+    renderTable();
+  }
+
+  /**
+   * Переключение на соседний фильтр по шагу (+1 или -1)
+   */
+  function switchFilterByStep(step) {
+    const currentIndex = FILTER_ORDER.indexOf(state.activeFilter);
+    if (currentIndex === -1) return false;
+
+    const nextIndex = currentIndex + step;
+    if (nextIndex < 0 || nextIndex >= FILTER_ORDER.length) {
+      // Эффект отпружинивания (bounce) при попытке свайпа за пределы крайних вкладок
+      if (dom.tableWrapper) {
+        const bounceClass = step > 0 ? 'swipe-bounce-left' : 'swipe-bounce-right';
+        dom.tableWrapper.classList.remove('swipe-slide-left', 'swipe-slide-right', 'swipe-bounce-left', 'swipe-bounce-right');
+        void dom.tableWrapper.offsetWidth;
+        dom.tableWrapper.classList.add(bounceClass);
+        setTimeout(() => {
+          dom.tableWrapper.classList.remove(bounceClass);
+        }, 240);
+      }
+      return false;
+    }
+
+    // Тактильный виброотклик на смартфонах
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate(10);
+      } catch (_) {}
+    }
+
+    const nextFilter = FILTER_ORDER[nextIndex];
+    setActiveFilter(nextFilter, step);
+    return true;
+  }
+
+  /**
+   * Инициализация мобильного жестового свайпа по области таблицы
+   */
+  function initTouchSwipe() {
+    const target = dom.tableCard || dom.tableWrapper;
+    if (!target) return;
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let isSwiping = false;
+
+    target.addEventListener('touchstart', (e) => {
+      // Отслеживаем только одиночные касания
+      if (e.touches.length !== 1) return;
+
+      // Не обрабатываем свайпы, если открыто модальное окно
+      if (document.querySelector('.modal-overlay.open')) {
+        isSwiping = false;
+        return;
+      }
+
+      const touch = e.touches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchStartTime = Date.now();
+      isSwiping = true;
+
+      // Защита от системных жестов истории "Назад/Вперед" в iOS Safari и Android Chrome
+      const edgeMargin = 25;
+      if (touchStartX < edgeMargin || touchStartX > window.innerWidth - edgeMargin) {
+        isSwiping = false;
+        return;
+      }
+
+      // Не перехватываем свайп, если касание началось на интерактивном элементе ввода, меню или кнопке
+      const el = e.target;
+      if (el && el.closest('input, select, textarea, button, a, .dropdown-menu, .modal-card, .btn-icon')) {
+        isSwiping = false;
+        return;
+      }
+    }, { passive: true });
+
+    target.addEventListener('touchmove', (e) => {
+      if (!isSwiping || e.touches.length !== 1) return;
+
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+
+      // Если пользователь листает таблицу вертикально, отменяем свайп фильтров
+      if (Math.abs(deltaY) > 25 && Math.abs(deltaY) > Math.abs(deltaX)) {
+        isSwiping = false;
+      }
+    }, { passive: true });
+
+    target.addEventListener('touchend', (e) => {
+      if (!isSwiping) return;
+      isSwiping = false;
+
+      if (!e.changedTouches || e.changedTouches.length === 0) return;
+      const touch = e.changedTouches[0];
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+      const duration = Date.now() - touchStartTime;
+
+      // Критерии валидного горизонтального свайпа:
+      // 1. Длина смещения по X не менее 45px
+      // 2. Угол жеста выраженно горизонтальный: |deltaX| > |deltaY| * 1.5
+      // 3. Быстрый жест (не более 500мс)
+      if (
+        Math.abs(deltaX) >= 45 &&
+        Math.abs(deltaX) > Math.abs(deltaY) * 1.5 &&
+        duration <= 500
+      ) {
+        if (deltaX < 0) {
+          // Свайп влево (палец движется справа налево) -> Следующий фильтр
+          switchFilterByStep(1);
+        } else {
+          // Свайп вправо (палец движется слева направо) -> Предыдущий фильтр
+          switchFilterByStep(-1);
+        }
+      }
+    }, { passive: true });
+
+    target.addEventListener('touchcancel', () => {
+      isSwiping = false;
+    }, { passive: true });
+  }
+
+  // ==========================================================================
   // СЛУШАТЕЛИ СОБЫТИЙ (EVENT LISTENERS)
   // ==========================================================================
   function setupEventListeners() {
@@ -2126,15 +2299,12 @@
     // Вкладки-фильтры
     dom.filterTabs.forEach(tab => {
       tab.addEventListener('click', () => {
-        dom.filterTabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        state.activeFilter = tab.dataset.filter;
-        state.subFilter = 'all'; // сброс в "Все форматы", чтобы сразу видеть полный срез новой вкладки
-        renderGroupChips(); // обновляет счетчики на чипсах категорий
-        updateSubFilterBadges();
-        renderTable();
+        setActiveFilter(tab.dataset.filter, 0);
       });
     });
+
+    // Свайп-навигация между фильтрами на мобильных устройствах
+    initTouchSwipe();
 
     // Подфильтры по формату тары (Разливное / Бутылочное)
     if (dom.subFilterTabs) {

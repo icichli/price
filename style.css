@@ -399,6 +399,7 @@ body {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
+  width: auto;
   margin-bottom: 4px;
 }
 
@@ -1883,13 +1884,20 @@ body {
 
   /* Вкладки поставщиков с горизонтальным свайпом без вертикального скролла */
   .suppliers-bar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
     padding: 0;
     gap: 8px;
     overflow: visible;
+    width: 100%;
   }
 
   .suppliers-tabs {
-    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    flex: 1 1 auto;
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden !important;
@@ -1907,17 +1915,22 @@ body {
   .supplier-tab {
     padding: 6px 12px;
     font-size: 12px;
-    flex-shrink: 0;
+    flex: 0 0 auto !important;
+    white-space: nowrap;
   }
 
   .supplier-menu-container {
-    flex-shrink: 0;
+    width: auto !important;
+    flex: 0 0 auto !important;
     margin-bottom: 3px;
+    display: inline-flex;
   }
 
-  .tab-add-btn {
+  .supplier-menu-container .tab-add-btn {
+    width: auto !important;
     padding: 5px 10px;
     font-size: 12px;
+    white-space: nowrap;
   }
 
   /* Компактная зона загрузки на телефоне */
@@ -2027,11 +2040,13 @@ body {
     font-size: 13px;
   }
 
-  .dropdown-container {
+  .actions-row .dropdown-container,
+  .main-actions-group .dropdown-container {
     width: 100%;
   }
 
-  .dropdown-container .btn {
+  .actions-row .dropdown-container .btn,
+  .main-actions-group .dropdown-container .btn {
     width: 100%;
     justify-content: center;
   }
@@ -2043,6 +2058,7 @@ body {
     overflow-x: hidden;
     /* Никакого горизонтального скролла */
     max-height: calc(100vh - 250px);
+    touch-action: pan-y;
   }
 
   .data-table {
@@ -2161,5 +2177,69 @@ body {
     font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
+  }
+}
+
+/* ==========================================================================
+   СВАЙП-АНИМАЦИИ ПЕРЕКЛЮЧЕНИЯ ФИЛЬТРОВ
+   ========================================================================== */
+@keyframes swipeSlideInLeft {
+  0% {
+    opacity: 0.5;
+    transform: translateX(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes swipeSlideInRight {
+  0% {
+    opacity: 0.5;
+    transform: translateX(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes swipeBounceLeft {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(-14px); }
+  70% { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes swipeBounceRight {
+  0% { transform: translateX(0); }
+  35% { transform: translateX(14px); }
+  70% { transform: translateX(-3px); }
+  100% { transform: translateX(0); }
+}
+
+.table-wrapper.swipe-slide-left {
+  animation: swipeSlideInLeft 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.table-wrapper.swipe-slide-right {
+  animation: swipeSlideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.table-wrapper.swipe-bounce-left {
+  animation: swipeBounceLeft 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.table-wrapper.swipe-bounce-right {
+  animation: swipeBounceRight 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-wrapper.swipe-slide-left,
+  .table-wrapper.swipe-slide-right,
+  .table-wrapper.swipe-bounce-left,
+  .table-wrapper.swipe-bounce-right {
+    animation: none !important;
   }
 }
