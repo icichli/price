@@ -273,20 +273,34 @@ body {
    ========================================================================== */
 .suppliers-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   border-bottom: 2px solid var(--border-color);
-  padding-bottom: 2px;
+  padding: 0;
   gap: 12px;
-  overflow-x: auto;
+  position: relative;
+  overflow: visible;
 }
 
 .suppliers-tabs {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden !important;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE / Edge */
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: -2px;
+  padding-top: 4px;
+}
+
+.suppliers-tabs::-webkit-scrollbar {
+  display: none !important; /* Chrome, Edge, Safari */
+  width: 0 !important;
+  height: 0 !important;
 }
 
 .supplier-tab {
@@ -297,14 +311,15 @@ body {
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-bottom: none;
+  border-bottom: 2px solid transparent;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: var(--transition);
   position: relative;
   white-space: nowrap;
+  flex-shrink: 0;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -327,18 +342,13 @@ body {
   background: var(--bg-secondary);
   color: var(--accent-primary);
   font-weight: 600;
-  border-color: var(--border-color);
+  border-color: var(--border-color) var(--border-color) var(--accent-primary) var(--border-color);
+  border-bottom: 2px solid var(--accent-primary);
+  z-index: 2;
 }
 
 .supplier-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -3px;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--accent-primary);
-  border-radius: 2px 2px 0 0;
+  display: none;
 }
 
 .tab-action-icon {
@@ -364,9 +374,9 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
+  padding: 7px 12px;
   border-radius: var(--radius-md);
-  background: transparent;
+  background: var(--bg-secondary);
   border: 1px dashed var(--border-color);
   color: var(--text-secondary);
   font-size: 13px;
@@ -385,6 +395,8 @@ body {
 .supplier-menu-container {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
+  margin-bottom: 4px;
 }
 
 .supplier-dropdown-menu {
@@ -953,48 +965,188 @@ body {
   border-color: var(--border-focus);
 }
 
-/* Компактный выпадающий список разделов/групп из файла */
-.group-filter-container {
+/* ==========================================================================
+   ИНТЕРАКТИВНЫЕ ЧИПСЫ РАЗДЕЛОВ И БРЕНДОВ (ВАРИАНТ 1)
+   ========================================================================== */
+.group-chips-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+/* Ряд 1: Главные разделы */
+.group-main-chips {
   display: flex;
   align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 0;
 }
 
-.select-wrapper {
-  position: relative;
+.group-main-chips::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.group-chip {
   display: inline-flex;
   align-items: center;
-}
-
-.select-icon {
-  position: absolute;
-  left: 10px;
-  color: var(--accent-primary);
-  pointer-events: none;
-}
-
-.group-filter-select {
-  height: 38px;
-  padding: 0 12px 0 32px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
   background: var(--bg-secondary);
-  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
-  outline: none;
   cursor: pointer;
   transition: var(--transition);
-  max-width: 250px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
 }
 
-.group-filter-select:hover {
-  border-color: var(--accent-primary);
+.group-chip:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
 }
 
-.group-filter-select:focus {
+.group-chip.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.group-chip .chip-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.group-chip .chip-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  margin-left: 2px;
+}
+
+.group-chip.active .chip-badge {
+  background: rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+}
+
+/* Ряд 2: Подразделы / Бренды */
+.group-sub-chips-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  animation: fadeIn 0.2s ease;
+}
+
+.group-sub-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.group-sub-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  flex: 1;
+  min-width: 0;
+}
+
+.group-sub-chips::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.group-sub-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.group-sub-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
   border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.group-sub-chip.active {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+[data-theme="dark"] .group-sub-chip.active {
+  background: rgba(96, 165, 250, 0.18);
+  border-color: var(--border-focus);
+  color: #93c5fd;
+}
+
+.group-sub-chip .sub-chip-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .group-sub-chip .sub-chip-badge {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.group-sub-chip.active .sub-chip-badge {
+  background: var(--accent-primary);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .group-sub-chip.active .sub-chip-badge {
+  background: var(--border-focus);
+  color: #090d16;
 }
 
 .item-category-tag {
@@ -1725,17 +1877,43 @@ body {
     font-size: 12px;
   }
 
-  /* Вкладки поставщиков с горизонтальным свайпом */
+  /* Вкладки поставщиков с горизонтальным свайпом без вертикального скролла */
   .suppliers-bar {
-    padding: 4px;
-    gap: 6px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    padding: 0;
+    gap: 8px;
+    overflow: visible;
   }
 
-  .suppliers-bar::-webkit-scrollbar {
-    display: none;
+  .suppliers-tabs {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden !important;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: -2px;
+  }
+
+  .suppliers-tabs::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  .supplier-tab {
+    padding: 6px 12px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .supplier-menu-container {
+    flex-shrink: 0;
+    margin-bottom: 3px;
+  }
+
+  .tab-add-btn {
+    padding: 5px 10px;
+    font-size: 12px;
   }
 
   /* Компактная зона загрузки на телефоне */

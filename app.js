@@ -40,9 +40,10 @@
     },
 
     // Фильтрация, сортировка и поиск
-    activeFilter: 'all', // 'all' | 'new' | 'growth' | 'drop' | 'out'
-    subFilter: 'all',    // 'all' | 'draft' | 'bottle'
-    groupFilter: 'all',  // 'all' | 'main:Категория' | 'sub:Категория|Подкатегория'
+    activeFilter: 'all',          // 'all' | 'new' | 'growth' | 'drop' | 'out'
+    subFilter: 'all',             // 'all' | 'draft' | 'bottle'
+    selectedMainCategory: 'all',  // 'all' | 'КРАФТ фасовка' | etc.
+    selectedSubCategory: 'all',   // 'all' | 'Аляска Бревери' | etc.
     searchQuery: '',
     sortField: 'stockDelta',
     sortDir: 'desc',
@@ -110,9 +111,11 @@
     subBadgeAll: document.getElementById('subBadgeAll'),
     subBadgeDraft: document.getElementById('subBadgeDraft'),
     subBadgeBottle: document.getElementById('subBadgeBottle'),
+    groupChipsWrapper: document.getElementById('groupChipsWrapper'),
+    groupMainChips: document.getElementById('groupMainChips'),
+    groupSubChipsContainer: document.getElementById('groupSubChipsContainer'),
+    groupSubChips: document.getElementById('groupSubChips'),
     searchInput: document.getElementById('searchInput'),
-    groupFilterContainer: document.getElementById('groupFilterContainer'),
-    groupFilterSelect: document.getElementById('groupFilterSelect'),
 
     btnCommitSnapshot: document.getElementById('btnCommitSnapshot'),
     btnRollbackSnapshot: document.getElementById('btnRollbackSnapshot'),
@@ -423,7 +426,7 @@
       renderTable();
     } else {
       state.diffItems = [];
-      updateGroupFilterOptions();
+      renderGroupChips();
       updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
       dom.fileCard.classList.remove('visible');
       renderTable();
@@ -463,7 +466,7 @@
       drop: 0,
       out: 0
     };
-    updateGroupFilterOptions();
+    renderGroupChips();
     updateBadges(stats);
     renderTable();
   }
@@ -695,8 +698,10 @@
     state.currentSheetName = '';
     state.currentSheetData = [];
     state.parsedItems = [];
-    state.groupFilter = 'all';
+    state.selectedMainCategory = 'all';
+    state.selectedSubCategory = 'all';
     state.subFilter = 'all';
+    if (dom.groupChipsWrapper) dom.groupChipsWrapper.style.display = 'none';
     dom.fileInput.value = '';
     dom.btnCommitSnapshot.disabled = true;
 
@@ -725,7 +730,7 @@
       isShowingCommittedShipment = true;
     } else {
       state.diffItems = [];
-      updateGroupFilterOptions();
+      renderGroupChips();
       updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
       dom.fileCard.classList.remove('visible');
       return;
@@ -870,7 +875,7 @@
       out: outCount
     };
 
-    updateGroupFilterOptions();
+    renderGroupChips();
     updateBadges(state.diffStats);
 
     if (isShowingCommittedShipment) {
@@ -925,14 +930,11 @@
       baseItems = baseItems.filter(i => i.status === state.activeFilter);
     }
 
-    // Учитываем фильтр по группе из файла (связка фильтров)
-    if (state.groupFilter && state.groupFilter !== 'all') {
-      if (state.groupFilter.startsWith('main:')) {
-        const targetMain = state.groupFilter.slice(5);
-        baseItems = baseItems.filter(i => i.category === targetMain);
-      } else if (state.groupFilter.startsWith('sub:')) {
-        const [targetMain, targetSub] = state.groupFilter.slice(4).split('|');
-        baseItems = baseItems.filter(i => i.category === targetMain && i.subCategory === targetSub);
+    // Учитываем фильтр по разделу и пивоварне (Вариант 1)
+    if (state.selectedMainCategory && state.selectedMainCategory !== 'all') {
+      baseItems = baseItems.filter(i => i.category === state.selectedMainCategory);
+      if (state.selectedSubCategory && state.selectedSubCategory !== 'all') {
+        baseItems = baseItems.filter(i => i.subCategory === state.selectedSubCategory);
       }
     }
 
@@ -968,65 +970,158 @@
   }
 
   /**
-   * Обновление выпадающего списка групп / пивоварен из загруженного файла
+   * Интерактивные чипсы разделов и пивоварен из файла (Вариант 1)
    */
-  function updateGroupFilterOptions() {
-    if (!dom.groupFilterContainer || !dom.groupFilterSelect) return;
+  function renderGroupChips() {
+    if (!dom.groupChipsWrapper || !dom.groupMainChips) return;
 
-    // Собираем группы и подгруппы из diffItems
-    const mainCategories = new Map();
+    // Считаем распределение по категориям в контексте активного таба (Появилось, +, -, Выбыло или Все)
+    let activeItems = state.diffItems;
+    if (state.activeFilter !== 'all') {
+      activeItems = activeItems.filter(i => i.status === state.activeFilter);
+    }
+
+    // Собираем все категории и подкатегории
+    const categoryMap = new Map(); // mainCat -> Map(subCat -> totalAllCount)
 
     state.diffItems.forEach(item => {
       const mainCat = (item.category || '').trim();
       const subCat = (item.subCategory || '').trim();
-
       if (mainCat) {
-        if (!mainCategories.has(mainCat)) {
-          mainCategories.set(mainCat, new Map());
+        if (!categoryMap.has(mainCat)) {
+          categoryMap.set(mainCat, new Map());
         }
         if (subCat) {
-          const subMap = mainCategories.get(mainCat);
-          subMap.set(subCat, (subMap.get(subCat) || 0) + 1);
+          const subMap = categoryMap.get(mainCat);
+          if (!subMap.has(subCat)) {
+            subMap.set(subCat, 0);
+          }
         }
       }
     });
 
-    // Если в файле нет разделов — скрываем фильтр групп
-    if (mainCategories.size === 0) {
-      dom.groupFilterContainer.style.display = 'none';
-      state.groupFilter = 'all';
+    // Если в файле вообще нет разделов — полностью скрываем блок чипсов
+    if (categoryMap.size === 0) {
+      dom.groupChipsWrapper.style.display = 'none';
+      state.selectedMainCategory = 'all';
+      state.selectedSubCategory = 'all';
       return;
     }
 
-    dom.groupFilterContainer.style.display = 'flex';
+    dom.groupChipsWrapper.style.display = 'flex';
 
-    // Формируем структуру с <optgroup> для главных разделов и <option> для подгрупп
-    let html = `<option value="all">Все разделы (${state.diffItems.length})</option>`;
+    // Считаем актуальные количества для текущей активной вкладки
+    const mainCounts = new Map();
+    const subCounts = new Map(); // "mainCat:::subCat" -> count
 
-    mainCategories.forEach((subMap, mainCat) => {
-      const mainCatTotal = state.diffItems.filter(i => i.category === mainCat).length;
-      if (subMap.size > 0) {
-        html += `<optgroup label="📁 ${escapeHtml(mainCat)}">`;
-        html += `<option value="main:${escapeHtml(mainCat)}">Все в «${escapeHtml(mainCat)}» (${mainCatTotal})</option>`;
-        subMap.forEach((count, subCat) => {
-          html += `<option value="sub:${escapeHtml(mainCat)}|${escapeHtml(subCat)}">&nbsp;&nbsp;↳ ${escapeHtml(subCat)} (${count})</option>`;
-        });
-        html += `</optgroup>`;
-      } else {
-        html += `<option value="main:${escapeHtml(mainCat)}">📁 ${escapeHtml(mainCat)} (${mainCatTotal})</option>`;
+    activeItems.forEach(item => {
+      const mainCat = (item.category || '').trim();
+      const subCat = (item.subCategory || '').trim();
+      if (mainCat) {
+        mainCounts.set(mainCat, (mainCounts.get(mainCat) || 0) + 1);
+        if (subCat) {
+          const subKey = `${mainCat}:::${subCat}`;
+          subCounts.set(subKey, (subCounts.get(subKey) || 0) + 1);
+        }
       }
     });
 
-    dom.groupFilterSelect.innerHTML = html;
+    // 1. РЕНДЕР ЯРУСА 1: Главные разделы
+    dom.groupMainChips.innerHTML = '';
 
-    // Восстанавливаем выбранное значение или сбрасываем в 'all'
-    const optionExists = Array.from(dom.groupFilterSelect.options).some(opt => opt.value === state.groupFilter);
-    if (optionExists) {
-      dom.groupFilterSelect.value = state.groupFilter;
+    // Чипс "Все разделы"
+    const totalActiveWithCat = activeItems.length;
+    const btnAll = document.createElement('button');
+    btnAll.type = 'button';
+    btnAll.className = `group-chip ${state.selectedMainCategory === 'all' ? 'active' : ''}`;
+    btnAll.innerHTML = `<span class="chip-icon">📁</span><span>Все разделы</span><span class="chip-badge">${totalActiveWithCat}</span>`;
+    btnAll.addEventListener('click', () => {
+      state.selectedMainCategory = 'all';
+      state.selectedSubCategory = 'all';
+      renderGroupChips();
+      updateSubFilterBadges();
+      renderTable();
+    });
+    dom.groupMainChips.appendChild(btnAll);
+
+    // Чипсы для каждого главного раздела
+    categoryMap.forEach((subMap, mainCat) => {
+      const count = mainCounts.get(mainCat) || 0;
+      const icon = getCategoryIcon(mainCat);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `group-chip ${state.selectedMainCategory === mainCat ? 'active' : ''}`;
+      btn.innerHTML = `<span class="chip-icon">${icon}</span><span>${escapeHtml(mainCat)}</span><span class="chip-badge">${count}</span>`;
+      btn.addEventListener('click', () => {
+        state.selectedMainCategory = mainCat;
+        state.selectedSubCategory = 'all'; // сброс фильтра пивоварни при смене категории
+        renderGroupChips();
+        updateSubFilterBadges();
+        renderTable();
+      });
+      dom.groupMainChips.appendChild(btn);
+    });
+
+    // 2. РЕНДЕР ЯРУСА 2: Подразделы / Бренды
+    // Отображается только если выбран конкретный раздел И у него есть подкатегории
+    if (state.selectedMainCategory !== 'all' && categoryMap.has(state.selectedMainCategory)) {
+      const subMap = categoryMap.get(state.selectedMainCategory);
+      if (subMap && subMap.size > 0) {
+        dom.groupSubChipsContainer.style.display = 'flex';
+        dom.groupSubChips.innerHTML = '';
+
+        // Кнопка "Все в этом разделе"
+        const mainCatCount = mainCounts.get(state.selectedMainCategory) || 0;
+        const btnSubAll = document.createElement('button');
+        btnSubAll.type = 'button';
+        btnSubAll.className = `group-sub-chip ${state.selectedSubCategory === 'all' ? 'active' : ''}`;
+        btnSubAll.innerHTML = `<span>Все в разделе</span><span class="sub-chip-badge">${mainCatCount}</span>`;
+        btnSubAll.addEventListener('click', () => {
+          state.selectedSubCategory = 'all';
+          renderGroupChips();
+          updateSubFilterBadges();
+          renderTable();
+        });
+        dom.groupSubChips.appendChild(btnSubAll);
+
+        // Кнопки для каждого бренда/пивоварни
+        subMap.forEach((_, subCat) => {
+          const subKey = `${state.selectedMainCategory}:::${subCat}`;
+          const count = subCounts.get(subKey) || 0;
+          const btnSub = document.createElement('button');
+          btnSub.type = 'button';
+          btnSub.className = `group-sub-chip ${state.selectedSubCategory === subCat ? 'active' : ''}`;
+          btnSub.innerHTML = `<span>${escapeHtml(subCat)}</span><span class="sub-chip-badge">${count}</span>`;
+          btnSub.addEventListener('click', () => {
+            state.selectedSubCategory = subCat;
+            renderGroupChips();
+            updateSubFilterBadges();
+            renderTable();
+          });
+          dom.groupSubChips.appendChild(btnSub);
+        });
+      } else {
+        dom.groupSubChipsContainer.style.display = 'none';
+        state.selectedSubCategory = 'all';
+      }
     } else {
-      state.groupFilter = 'all';
-      dom.groupFilterSelect.value = 'all';
+      dom.groupSubChipsContainer.style.display = 'none';
+      state.selectedSubCategory = 'all';
     }
+  }
+
+  function getCategoryIcon(catName) {
+    const lower = String(catName || '').toLowerCase();
+    if (lower.includes('разлив') || lower.includes('кег')) return '🍺';
+    if (lower.includes('фасовк') || lower.includes('бут') || lower.includes('стекл') || lower.includes('ж/б') || lower.includes('ж.б')) return '📦';
+    if (lower.includes('вод')) return '💧';
+    if (lower.includes('сидр')) return '🍏';
+    if (lower.includes('снек') || lower.includes('чипс') || lower.includes('грен')) return '🥨';
+    if (lower.includes('росси')) return '🇷🇺';
+    if (lower.includes('крафт')) return '✨';
+    if (lower.includes('лимонад') || lower.includes('сок') || lower.includes('напит')) return '🥤';
+    if (lower.includes('импорт')) return '🌍';
+    return '📁';
   }
 
   function escapeHtml(str) {
@@ -1056,14 +1151,11 @@
       items = items.filter(i => i.packageType !== 'draft');
     }
 
-    // 1.2. Фильтрация по разделу / пивоварне из файла
-    if (state.groupFilter && state.groupFilter !== 'all') {
-      if (state.groupFilter.startsWith('main:')) {
-        const targetMain = state.groupFilter.slice(5);
-        items = items.filter(i => i.category === targetMain);
-      } else if (state.groupFilter.startsWith('sub:')) {
-        const [targetMain, targetSub] = state.groupFilter.slice(4).split('|');
-        items = items.filter(i => i.category === targetMain && i.subCategory === targetSub);
+    // 1.2. Фильтрация по разделу и пивоварне (Вариант 1)
+    if (state.selectedMainCategory && state.selectedMainCategory !== 'all') {
+      items = items.filter(i => i.category === state.selectedMainCategory);
+      if (state.selectedSubCategory && state.selectedSubCategory !== 'all') {
+        items = items.filter(i => i.subCategory === state.selectedSubCategory);
       }
     }
 
@@ -1335,9 +1427,10 @@
       state.currentSheetData = [];
       state.currentFileName = '';
       state.diffItems = [];
-      state.groupFilter = 'all';
+      state.selectedMainCategory = 'all';
+      state.selectedSubCategory = 'all';
       state.subFilter = 'all';
-      if (dom.groupFilterContainer) dom.groupFilterContainer.style.display = 'none';
+      if (dom.groupChipsWrapper) dom.groupChipsWrapper.style.display = 'none';
       dom.fileInput.value = '';
 
       if (sup && sup.mapping) {
@@ -1380,13 +1473,10 @@
       items = items.filter(i => i.packageType !== 'draft');
     }
 
-    if (state.groupFilter && state.groupFilter !== 'all') {
-      if (state.groupFilter.startsWith('main:')) {
-        const targetMain = state.groupFilter.slice(5);
-        items = items.filter(i => i.category === targetMain);
-      } else if (state.groupFilter.startsWith('sub:')) {
-        const [targetMain, targetSub] = state.groupFilter.slice(4).split('|');
-        items = items.filter(i => i.category === targetMain && i.subCategory === targetSub);
+    if (state.selectedMainCategory && state.selectedMainCategory !== 'all') {
+      items = items.filter(i => i.category === state.selectedMainCategory);
+      if (state.selectedSubCategory && state.selectedSubCategory !== 'all') {
+        items = items.filter(i => i.subCategory === state.selectedSubCategory);
       }
     }
 
@@ -2040,6 +2130,7 @@
         tab.classList.add('active');
         state.activeFilter = tab.dataset.filter;
         state.subFilter = 'all'; // сброс в "Все форматы", чтобы сразу видеть полный срез новой вкладки
+        renderGroupChips(); // обновляет счетчики на чипсах категорий
         updateSubFilterBadges();
         renderTable();
       });
@@ -2054,15 +2145,6 @@
           state.subFilter = tab.dataset.subFilter;
           renderTable();
         });
-      });
-    }
-
-    // Выпадающий список групп / пивоварен из файла
-    if (dom.groupFilterSelect) {
-      dom.groupFilterSelect.addEventListener('change', (e) => {
-        state.groupFilter = e.target.value;
-        updateSubFilterBadges();
-        renderTable();
       });
     }
 

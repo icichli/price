@@ -285,7 +285,27 @@
         </div>
       </div>
 
-      <!-- Строка поиска, фильтр групп и выгрузка списка -->
+      <!-- Интерактивные чипсы разделов и пивоварен из файла (Вариант 1) -->
+      <div class="group-chips-wrapper" id="groupChipsWrapper" style="display: none;">
+        <!-- Ряд 1: Главные разделы -->
+        <div class="group-main-chips" id="groupMainChips">
+          <!-- Генерируется через JS -->
+        </div>
+        <!-- Ряд 2: Подразделы / Бренды -->
+        <div class="group-sub-chips-container" id="groupSubChipsContainer" style="display: none;">
+          <span class="group-sub-label">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+            Бренд:
+          </span>
+          <div class="group-sub-chips" id="groupSubChips">
+            <!-- Генерируется через JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Строка поиска и выгрузка списка -->
       <div class="actions-row">
         <div class="search-box">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -293,20 +313,6 @@
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
           <input type="text" id="searchInput" class="search-input" placeholder="Поиск по названию или артикулу...">
-        </div>
-
-        <!-- Компактный выпадающий список групп / пивоварен из файла -->
-        <div class="group-filter-container" id="groupFilterContainer" style="display: none;">
-          <div class="select-wrapper">
-            <svg class="select-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-              <polyline points="2 17 12 22 22 17"></polyline>
-              <polyline points="2 12 12 17 22 12"></polyline>
-            </svg>
-            <select id="groupFilterSelect" class="group-filter-select" title="Фильтр по группам и пивоварням из файла">
-              <option value="all">Все разделы файла</option>
-            </select>
-          </div>
         </div>
 
         <div class="dropdown-container">
