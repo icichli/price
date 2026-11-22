@@ -343,19 +343,9 @@
 
   function displayBaselineAsCurrent() {
     state.diffItems = state.baselineSnapshot.current.map(item => {
-      let pkgInfo = null;
-      if (item.packageType) {
-        pkgInfo = {
-          type: item.packageType,
-          subType: item.packageSubType || item.packageType,
-          label: item.packageLabel || (item.packageType === 'draft' ? 'Разливное' : 'Бутылочное'),
-          icon: item.packageIcon || (item.packageType === 'draft' ? '🍺' : '🍾')
-        };
-      } else if (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function') {
-        pkgInfo = window.ExcelParser.detectPackageType(item.name, item.rawUnit || item.unit, item.category);
-      } else {
-        pkgInfo = { type: 'other', subType: 'other', label: 'Товар', icon: '📦' };
-      }
+      const pkgInfo = (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function')
+        ? window.ExcelParser.detectPackageType(item.name, item.rawUnit || item.unit, item.category)
+        : (item.packageType ? { type: item.packageType, subType: item.packageSubType || item.packageType, label: item.packageLabel || 'Товар', icon: item.packageIcon || '' } : { type: 'other', subType: 'other', label: 'Товар', icon: '📦' });
 
       return {
         status: 'normal',
@@ -723,19 +713,9 @@
       }
 
       // Определение тары (Разливное / Бутылочное)
-      let pkgInfo = null;
-      if (curr.packageType) {
-        pkgInfo = {
-          type: curr.packageType,
-          subType: curr.packageSubType || curr.packageType,
-          label: curr.packageLabel || (curr.packageType === 'draft' ? 'Разливное' : 'Бутылочное'),
-          icon: curr.packageIcon || (curr.packageType === 'draft' ? '🍺' : '🍾')
-        };
-      } else if (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function') {
-        pkgInfo = window.ExcelParser.detectPackageType(curr.name, curr.rawUnit || curr.unit, curr.category);
-      } else {
-        pkgInfo = { type: 'other', subType: 'other', label: 'Товар', icon: '📦' };
-      }
+      const pkgInfo = (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function')
+        ? window.ExcelParser.detectPackageType(curr.name, curr.rawUnit || curr.unit, curr.category)
+        : (curr.packageType ? { type: curr.packageType, subType: curr.packageSubType || curr.packageType, label: curr.packageLabel || 'Товар', icon: curr.packageIcon || '' } : { type: 'other', subType: 'other', label: 'Товар', icon: '📦' });
 
       diffResults.push({
         status,
@@ -758,19 +738,9 @@
     // 3. Обрабатываем позиции, которые БЫЛИ в базе с остатком > 0, но ИСЧЕЗЛИ
     for (const [key, prev] of prevMap.entries()) {
       if (!seenPrevKeys.has(key) && prev.stock > 0) {
-        let pkgInfo = null;
-        if (prev.packageType) {
-          pkgInfo = {
-            type: prev.packageType,
-            subType: prev.packageSubType || prev.packageType,
-            label: prev.packageLabel || (prev.packageType === 'draft' ? 'Разливное' : 'Бутылочное'),
-            icon: prev.packageIcon || (prev.packageType === 'draft' ? '🍺' : '🍾')
-          };
-        } else if (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function') {
-          pkgInfo = window.ExcelParser.detectPackageType(prev.name, prev.rawUnit || prev.unit, prev.category);
-        } else {
-          pkgInfo = { type: 'other', subType: 'other', label: 'Товар', icon: '📦' };
-        }
+        const pkgInfo = (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function')
+          ? window.ExcelParser.detectPackageType(prev.name, prev.rawUnit || prev.unit, prev.category)
+          : (prev.packageType ? { type: prev.packageType, subType: prev.packageSubType || prev.packageType, label: prev.packageLabel || 'Товар', icon: prev.packageIcon || '' } : { type: 'other', subType: 'other', label: 'Товар', icon: '📦' });
 
         diffResults.push({
           status: 'out',
@@ -869,6 +839,13 @@
     if (dom.subBadgeAll) dom.subBadgeAll.textContent = baseItems.length;
     if (dom.subBadgeDraft) dom.subBadgeDraft.textContent = draftCount;
     if (dom.subBadgeBottle) dom.subBadgeBottle.textContent = bottleCount;
+
+    // Синхронизируем подсветку активного чипса
+    if (dom.subFilterTabs) {
+      dom.subFilterTabs.forEach(t => {
+        t.classList.toggle('active', t.dataset.subFilter === state.subFilter);
+      });
+    }
 
     // Подфильтр отображается для вкладок 'new', 'growth' и 'all' при наличии позиций
     const isApplicable = ['new', 'growth', 'all'].includes(state.activeFilter);
@@ -1811,6 +1788,7 @@
         dom.filterTabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         state.activeFilter = tab.dataset.filter;
+        state.subFilter = 'all'; // сброс в "Все форматы", чтобы сразу видеть полный срез новой вкладки
         updateSubFilterBadges();
         renderTable();
       });

@@ -353,30 +353,54 @@ class ExcelParser {
     const unit = String(rawUnit || '').toLowerCase();
     const cat = String(categoryName || '').toLowerCase();
 
-    const isExplicitCan = /(?:ж\/?б|ж\.б|жест[а-я]*|бан(?:к[а-я]*)?|\bcan\b)/i.test(name);
-    const isExplicitBottle = /(?:бут(?:ыл[а-я]*)?|ст\/бут|ст\.бут|ст[.]|\bст\b|стекл[а-я]*|\bbottle\b)/i.test(name);
-    const hasSmallVol = /(?:(?:\b|[\s_/-])(?:0[.,]\d+|0[.,]25|0[.,]33|0[.,]375|0[.,]44|0[.,]45|0[.,]5|0[.,]75|1[.,]0|1[.,]5)\s*(?:л|литр[а-я]*|l)?\b)|(?:\b(?:250|330|355|440|450|500|650|750)\s*(?:мл|ml)\b)/i.test(name);
-    const hasPackNotation = /(?:(?:\b|[\s_/-])1\s*[/xх*]\s*(?:6|8|12|16|20|24)\b)|(?:(?:\b|[\s_/-])(?:12|20|24)\s*[/xх*]\s*0[.,]\d+)/i.test(name);
+    // Границы слова для русского и английского текста
+    const bStart = '(?:^|[\\s;:()/\\[\\]_—–-])';
+    const bEnd = '(?=[\\s,.;:()/\\[\\]_—–-]|$|[^a-zA-Zа-яА-ЯёЁ0-9])';
 
-    const isExplicitKeg = /(?:кег[а-я]*|кэг[а-я]*|\bkegs?\b|пэт-?кег[а-я]*|фитинг[а-я]*|бочк[а-я]*)/i.test(name) || unit.includes('кег');
-    const isDraftWord = /(?:разливн[а-я]*|на разлив)/i.test(name);
-    const hasKegVol = /(?:(?:\b|[\s_/-])(?:20|25|30|50)\s*(?:л|литр[а-я]*|l)\b)|(?:\b1\s*[/xх*]\s*(?:25|30|50)\b)/i.test(name);
+    // 1. Маркеры кегов и разливного
+    const isExplicitKeg = /(?:кег|кэг|\bkegs?\b|пэт-?к[еэ]г|бочк|бочон|фитинг|фит[.\s_-]*[asgmdа-я]|ф[.\s_-]*[asgmdа-я])/i.test(name) ||
+                          unit.includes('кег');
+    const isDraftWord = /(?:разлив|на разлив|\bдал\b)/i.test(name) || /(?:^|[\s_/-])дал(?:$|[\s_/-])/i.test(name);
+    const hasKegVol = new RegExp(
+      bStart + '(?:(?:10|15|20|25|30|50)(?:[.,]0+)?\\s*(?:л\\.?|литр[а-я]*|l\\b)|1\\s*[/xх*]\\s*(?:20|25|30|50)(?:\\s*л\\.?)?)' + bEnd,
+      'i'
+    ).test(name);
     const hasKegUnit = unit === 'кег' || unit === 'дал';
 
-    // 1. Если есть явный маркер банки, бутылки или малого объема, и нет слова КЕГ
-    if ((isExplicitCan || isExplicitBottle || hasSmallVol || hasPackNotation) && !isExplicitKeg) {
+    // 2. Маркеры банки, бутылки и фасовки
+    const isExplicitCan = /(?:ж\/?б|ж\.б|жест[а-я]*|бан(?:к[а-я]*)?|\bcan\b)/i.test(name);
+    const isExplicitBottle = /(?:бут(?:ыл[а-я]*)?|ст\/бут|ст\.бут|ст[.]|стекл[а-я]*|\bbottle\b)/i.test(name) ||
+                             new RegExp(bStart + 'ст' + bEnd, 'i').test(name);
+
+    // Малые объемы фасовки (0.25 - 3.0 л, 250 - 750 мл)
+    const hasSmallVol = new RegExp(
+      bStart + '(?:0[.,]\\d+|1[.,]\\d+|2[.,]\\d+|1|2|3)\\s*(?:л\\.?|литр[а-я]*|l\\b)' + bEnd + '|' +
+      bStart + '(?:0[.,](?:25|33|355|375|44|45|5|65|7|75))' + bEnd + '|' +
+      bStart + '(?:250|330|355|440|450|500|650|750)\\s*(?:мл|ml)?' + bEnd,
+      'i'
+    ).test(name);
+
+    // Формат ящика фасовки (1/12, 1/20 ст, 12х0.5 и т.п.)
+    const hasPackNotation = new RegExp(
+      bStart + '(?:1\\s*[/xх*]\\s*(?:6|8|12|16|20|24)|(?:12|20|24)\\s*[/xх*]\\s*0[.,]\\d+)' + bEnd,
+      'i'
+    ).test(name);
+
+    // ПРИОРИТЕТ 1: Явное разливное (кег, фитинг, разлив, дал, 30л, 50л, 20л)
+    // Если есть маркер кега/разлива ИЛИ объем кега (при отсутствии явного "бут/жб")
+    if (isExplicitKeg || isDraftWord || (hasKegVol && !isExplicitBottle && !isExplicitCan)) {
+      return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
+    }
+
+    // ПРИОРИТЕТ 2: Бутылочное / банка (банка, бутылка, малый объем, упаковка)
+    if (isExplicitCan || isExplicitBottle || hasSmallVol || hasPackNotation) {
       if (isExplicitCan) {
         return { type: 'bottle', subType: 'can', label: 'Банка', icon: '🥫' };
       }
       return { type: 'bottle', subType: 'bottle', label: 'Бутылочное', icon: '🍾' };
     }
 
-    // 2. Если есть явный маркер кега, разливного или кегового объема (20, 25, 30, 50л)
-    if (isExplicitKeg || isDraftWord || hasKegVol || hasKegUnit) {
-      return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
-    }
-
-    // 3. Проверяем родительскую категорию из отчета 1С
+    // ПРИОРИТЕТ 3: Категории 1С
     if (cat) {
       if (/(?:разлив|кег|кэг|бочк)/i.test(cat)) {
         return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
@@ -386,8 +410,8 @@ class ExcelParser {
       }
     }
 
-    // 4. Проверяем единицы измерения
-    if (unit === 'кег' || unit === 'дал' || unit === 'л' || unit === 'литр') {
+    // ПРИОРИТЕТ 4: Единицы измерения
+    if (hasKegUnit || unit === 'л' || unit === 'литр') {
       return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
     }
     if (unit === 'бут' || unit === 'бан' || unit === 'шт') {
