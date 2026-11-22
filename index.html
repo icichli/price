@@ -188,6 +188,30 @@
         </div>
       </div>
 
+      <!-- Вложенные фильтры-чипсы по таре: Разливное / Бутылочное -->
+      <div class="sub-filter-row" id="subFilterRow">
+        <div class="sub-filter-label">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+          </svg>
+          <span>Формат тары:</span>
+        </div>
+        <div class="sub-filter-tabs">
+          <button class="sub-filter-tab active" data-sub-filter="all">
+            <span>Все форматы</span>
+            <span class="sub-tab-badge" id="subBadgeAll">0</span>
+          </button>
+          <button class="sub-filter-tab" data-sub-filter="draft">
+            <span>🍺 Разливное</span>
+            <span class="sub-tab-badge" id="subBadgeDraft">0</span>
+          </button>
+          <button class="sub-filter-tab" data-sub-filter="bottle">
+            <span>🍾 Бутылочное / Банка</span>
+            <span class="sub-tab-badge" id="subBadgeBottle">0</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Строка поиска и ключевые кнопки действий -->
       <div class="actions-row">
         <div class="search-box">
@@ -290,11 +314,6 @@
               <th style="width: 140px; text-align: right;" class="sortable col-delta" data-sort="stockDelta">
                 <span class="desktop-header-title">Изменение</span>
                 <span class="mobile-header-title">Остаток</span>
-                <span class="sort-indicator"></span>
-              </th>
-              <th style="width: 140px; text-align: right;" class="sortable col-price" data-sort="currPrice">
-                <span class="desktop-header-title">Цена / Дельта</span>
-                <span class="mobile-header-title">Цена</span>
                 <span class="sort-indicator"></span>
               </th>
             </tr>

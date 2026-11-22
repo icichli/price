@@ -24,11 +24,6 @@ class ExcelParser {
         'код номенклатуры', 'код 1с', 'штрихкод', 'баркод',
         'sku', 'id', 'item id', 'code', 'art', 'barcode', 'articul'
       ],
-      price: [
-        'цена', 'прайс', 'стоимость', 'опт', 'розница', 'закупка',
-        'цена руб', 'цена без ндс', 'цена с ндс', 'цена опт', 'колонка цены',
-        'price', 'cost', 'rate', 'price_rub'
-      ],
       unit: [
         'ед. изм.', 'ед.изм.', 'ед. изм', 'ед изм', 'ед', 'базовая единица', 'unit', 'uom'
       ]
@@ -241,7 +236,6 @@ class ExcelParser {
       nameCol: -1,
       stockCol: -1,
       codeCol: -1,
-      priceCol: -1,
       unitCol: -1
     };
 
@@ -292,8 +286,7 @@ class ExcelParser {
     mapping.nameCol = findBestCol('name');
     mapping.stockCol = findBestCol('stock', [mapping.nameCol]);
     mapping.codeCol = findBestCol('code', [mapping.nameCol, mapping.stockCol]);
-    mapping.priceCol = findBestCol('price', [mapping.nameCol, mapping.stockCol, mapping.codeCol]);
-    mapping.unitCol = findBestCol('unit', [mapping.nameCol, mapping.stockCol, mapping.codeCol, mapping.priceCol]);
+    mapping.unitCol = findBestCol('unit', [mapping.nameCol, mapping.stockCol, mapping.codeCol]);
 
     return mapping;
   }
@@ -352,37 +345,62 @@ class ExcelParser {
   }
 
   /**
-   * Очистка и парсинг цены
+   * Определение типа тары (Разливное / Бутылочное / Банка / Прочее)
+   * Гибридный алгоритм: анализ наименования, единиц измерения и родительской категории 1С
    */
-  parsePriceValue(rawVal) {
-    if (rawVal === null || rawVal === undefined || rawVal === '') {
-      return null;
+  detectPackageType(nameStr, rawUnit = '', categoryName = '') {
+    const name = String(nameStr || '').toLowerCase();
+    const unit = String(rawUnit || '').toLowerCase();
+    const cat = String(categoryName || '').toLowerCase();
+
+    const isExplicitCan = /(?:ж\/?б|ж\.б|жест[а-я]*|бан(?:к[а-я]*)?|\bcan\b)/i.test(name);
+    const isExplicitBottle = /(?:бут(?:ыл[а-я]*)?|ст\/бут|ст\.бут|ст[.]|\bст\b|стекл[а-я]*|\bbottle\b)/i.test(name);
+    const hasSmallVol = /(?:(?:\b|[\s_/-])(?:0[.,]\d+|0[.,]25|0[.,]33|0[.,]375|0[.,]44|0[.,]45|0[.,]5|0[.,]75|1[.,]0|1[.,]5)\s*(?:л|литр[а-я]*|l)?\b)|(?:\b(?:250|330|355|440|450|500|650|750)\s*(?:мл|ml)\b)/i.test(name);
+    const hasPackNotation = /(?:(?:\b|[\s_/-])1\s*[/xх*]\s*(?:6|8|12|16|20|24)\b)|(?:(?:\b|[\s_/-])(?:12|20|24)\s*[/xх*]\s*0[.,]\d+)/i.test(name);
+
+    const isExplicitKeg = /(?:кег[а-я]*|кэг[а-я]*|\bkegs?\b|пэт-?кег[а-я]*|фитинг[а-я]*|бочк[а-я]*)/i.test(name) || unit.includes('кег');
+    const isDraftWord = /(?:разливн[а-я]*|на разлив)/i.test(name);
+    const hasKegVol = /(?:(?:\b|[\s_/-])(?:20|25|30|50)\s*(?:л|литр[а-я]*|l)\b)|(?:\b1\s*[/xх*]\s*(?:25|30|50)\b)/i.test(name);
+    const hasKegUnit = unit === 'кег' || unit === 'дал';
+
+    // 1. Если есть явный маркер банки, бутылки или малого объема, и нет слова КЕГ
+    if ((isExplicitCan || isExplicitBottle || hasSmallVol || hasPackNotation) && !isExplicitKeg) {
+      if (isExplicitCan) {
+        return { type: 'bottle', subType: 'can', label: 'Банка', icon: '🥫' };
+      }
+      return { type: 'bottle', subType: 'bottle', label: 'Бутылочное', icon: '🍾' };
     }
 
-    if (typeof rawVal === 'number') {
-      return isNaN(rawVal) ? null : Math.round(rawVal * 100) / 100;
+    // 2. Если есть явный маркер кега, разливного или кегового объема (20, 25, 30, 50л)
+    if (isExplicitKeg || isDraftWord || hasKegVol || hasKegUnit) {
+      return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
     }
 
-    let str = String(rawVal).trim().toLowerCase();
-    if (!str || str === '-' || str === '—') return null;
-
-    str = str.replace(/[₽$€]|руб|руб\.|usd|eur/gi, '').trim();
-    str = str.replace(/(\d)\s+(\d)/g, '$1$2');
-    str = str.replace(',', '.');
-
-    const match = str.match(/[-+]?\d+(?:\.\d+)?/);
-    if (match) {
-      const val = parseFloat(match[0]);
-      return isNaN(val) ? null : Math.round(val * 100) / 100;
+    // 3. Проверяем родительскую категорию из отчета 1С
+    if (cat) {
+      if (/(?:разлив|кег|кэг|бочк)/i.test(cat)) {
+        return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
+      }
+      if (/(?:бутыл|фасов|стекл|ж\/?б|банк)/i.test(cat)) {
+        return { type: 'bottle', subType: 'bottle', label: 'Бутылочное', icon: '🍾' };
+      }
     }
 
-    return null;
+    // 4. Проверяем единицы измерения
+    if (unit === 'кег' || unit === 'дал' || unit === 'л' || unit === 'литр') {
+      return { type: 'draft', subType: 'keg', label: 'Разливное', icon: '🍺' };
+    }
+    if (unit === 'бут' || unit === 'бан' || unit === 'шт') {
+      return { type: 'bottle', subType: 'bottle', label: 'Бутылочное', icon: '🍾' };
+    }
+
+    return { type: 'other', subType: 'other', label: 'Прочее', icon: '📦' };
   }
 
   /**
    * Проверка, является ли строка категорией / подзаголовком / группировкой 1С
    */
-  isCategoryOrSummaryRow(nameStr, rawStock, rawPrice, rawUnit) {
+  isCategoryOrSummaryRow(nameStr, rawStock, rawUnit) {
     const lower = nameStr.toLowerCase().trim();
 
     // 1. Итоговые строки 1С
@@ -390,21 +408,16 @@ class ExcelParser {
       return true;
     }
 
-    // 2. Строки категорий, где остаток и цена полностью пустые
+    // 2. Строки категорий, где остаток полностью пустой
     const isStockEmpty = (rawStock === null || rawStock === undefined || String(rawStock).trim() === '');
-    const isPriceEmpty = (rawPrice === null || rawPrice === undefined || String(rawPrice).trim() === '');
-
-    if (isStockEmpty && isPriceEmpty) {
+    if (isStockEmpty) {
       return true;
     }
 
-    // 3. Специфика отчетов 1С с промежуточными суммами по группам:
-    // Если есть колонка Ед. изм. (rawUnit !== null), но в этой строке Ед. изм. ПУСТАЯ,
-    // а у настоящих товаров всегда указано "шт", "л", "кег", и в названии нет объема:
+    // 3. Специфика отчетов 1С с промежуточными суммами по группам
     if (rawUnit !== null && rawUnit !== undefined) {
       const unitStr = String(rawUnit).trim().toLowerCase();
       if (!unitStr) {
-        // Проверяем, похоже ли название на категорию (нет литража/штук/тары)
         const hasPackagingMarker = /(?:\d+(?:[\.,]\d+)?\s*(?:л|мл|кг|г|шт|ж\/б|ст|пэт|кег)|кег|пэт|ж\/б)/i.test(nameStr);
         if (!hasPackagingMarker) {
           return true; // Это строка группировки (например: "Вода питьевая", "КРАФТ разливное", "Аляска")
@@ -419,7 +432,7 @@ class ExcelParser {
    * Извлечение позиций номенклатуры из листа по настроенному маппингу
    */
   extractItems(sheetData, headerRowIndex, mapping) {
-    const { nameCol, stockCol, codeCol, priceCol, unitCol } = mapping;
+    const { nameCol, stockCol, codeCol, unitCol } = mapping;
 
     if (nameCol < 0 || stockCol < 0) {
       throw new Error('Колонки «Наименование» и «Остаток» обязательны для сопоставления');
@@ -427,6 +440,7 @@ class ExcelParser {
 
     const items = [];
     let skippedCategoriesCount = 0;
+    let currentCategory = '';
 
     for (let r = headerRowIndex + 1; r < sheetData.length; r++) {
       const row = sheetData[r];
@@ -435,35 +449,41 @@ class ExcelParser {
       const rawName = row[nameCol];
       const rawStock = row[stockCol];
       const rawCode = codeCol >= 0 ? row[codeCol] : null;
-      const rawPrice = priceCol >= 0 ? row[priceCol] : null;
       const rawUnit = unitCol >= 0 ? row[unitCol] : null;
 
       const nameStr = String(rawName || '').trim();
       if (!nameStr) continue;
 
-      // Пропускаем категории, группировки и строки Итого
-      if (this.isCategoryOrSummaryRow(nameStr, rawStock, rawPrice, rawUnit)) {
+      // Пропускаем категории, группировки и строки Итого, фиксируя текущий раздел
+      if (this.isCategoryOrSummaryRow(nameStr, rawStock, rawUnit)) {
         skippedCategoriesCount++;
+        const lowerCat = nameStr.toLowerCase().trim();
+        if (lowerCat !== 'итого' && !lowerCat.startsWith('итого') && lowerCat !== 'всего') {
+          currentCategory = nameStr;
+        }
         continue;
       }
 
       const parsedStock = this.parseStockValue(rawStock);
-      const parsedPrice = this.parsePriceValue(rawPrice);
       const codeStr = rawCode !== null && rawCode !== undefined ? String(rawCode).trim() : '';
-
       const normalizedName = this.normalizeItemName(nameStr);
+      const packageInfo = this.detectPackageType(nameStr, rawUnit, currentCategory);
 
       items.push({
         id: `item_${r}_${Date.now()}`,
         code: codeStr,
         name: nameStr,
         normalizedName: normalizedName,
+        category: currentCategory,
+        packageType: packageInfo.type,       // 'draft' | 'bottle' | 'other'
+        packageSubType: packageInfo.subType, // 'keg' | 'bottle' | 'can' | 'other'
+        packageLabel: packageInfo.label,     // 'Разливное' | 'Бутылочное' | 'Банка'
+        packageIcon: packageInfo.icon,       // '🍺' | '🍾' | '🥫' | '📦'
         stock: parsedStock.stock,
         isTextStock: parsedStock.isTextStock,
         textStockNote: parsedStock.textStockNote || '',
-        price: parsedPrice,
         rawStock: parsedStock.raw,
-        rawPrice: rawPrice !== null && rawPrice !== undefined ? String(rawPrice) : ''
+        rawUnit: rawUnit !== null && rawUnit !== undefined ? String(rawUnit).trim() : ''
       });
     }
 

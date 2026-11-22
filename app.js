@@ -41,6 +41,7 @@
 
     // Фильтрация, сортировка и поиск
     activeFilter: 'all', // 'all' | 'new' | 'growth' | 'drop' | 'out'
+    subFilter: 'all',    // 'all' | 'draft' | 'bottle'
     searchQuery: '',
     sortField: 'stockDelta',
     sortDir: 'desc',
@@ -96,6 +97,11 @@
     badgeGrowth: document.getElementById('badgeGrowth'),
     badgeDrop: document.getElementById('badgeDrop'),
     badgeOut: document.getElementById('badgeOut'),
+    subFilterRow: document.getElementById('subFilterRow'),
+    subFilterTabs: document.querySelectorAll('.sub-filter-tab'),
+    subBadgeAll: document.getElementById('subBadgeAll'),
+    subBadgeDraft: document.getElementById('subBadgeDraft'),
+    subBadgeBottle: document.getElementById('subBadgeBottle'),
     searchInput: document.getElementById('searchInput'),
 
     btnCommitSnapshot: document.getElementById('btnCommitSnapshot'),
@@ -336,21 +342,38 @@
   }
 
   function displayBaselineAsCurrent() {
-    state.diffItems = state.baselineSnapshot.current.map(item => ({
-      status: 'normal',
-      statusLabel: 'В базе',
-      code: item.code || '',
-      name: item.name,
-      prevStock: item.stock,
-      currStock: item.stock,
-      stockDelta: 0,
-      stockDeltaPct: 0,
-      prevPrice: item.price,
-      currPrice: item.price,
-      priceDelta: 0,
-      isTextStock: item.isTextStock,
-      textStockNote: item.textStockNote
-    }));
+    state.diffItems = state.baselineSnapshot.current.map(item => {
+      let pkgInfo = null;
+      if (item.packageType) {
+        pkgInfo = {
+          type: item.packageType,
+          subType: item.packageSubType || item.packageType,
+          label: item.packageLabel || (item.packageType === 'draft' ? 'Разливное' : 'Бутылочное'),
+          icon: item.packageIcon || (item.packageType === 'draft' ? '🍺' : '🍾')
+        };
+      } else if (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function') {
+        pkgInfo = window.ExcelParser.detectPackageType(item.name, item.rawUnit || item.unit, item.category);
+      } else {
+        pkgInfo = { type: 'other', subType: 'other', label: 'Товар', icon: '📦' };
+      }
+
+      return {
+        status: 'normal',
+        statusLabel: 'В базе',
+        code: item.code || '',
+        name: item.name,
+        packageType: pkgInfo.type,
+        packageSubType: pkgInfo.subType,
+        packageLabel: pkgInfo.label,
+        packageIcon: pkgInfo.icon,
+        prevStock: item.stock,
+        currStock: item.stock,
+        stockDelta: 0,
+        stockDeltaPct: 0,
+        isTextStock: item.isTextStock,
+        textStockNote: item.textStockNote
+      };
+    });
 
     const stats = {
       all: state.diffItems.length,
@@ -670,12 +693,6 @@
         stockDeltaPct = 100;
       }
 
-      const prevPrice = (prev && typeof prev.price === 'number' && !isNaN(prev.price)) ? prev.price : null;
-      const currPrice = (curr && typeof curr.price === 'number' && !isNaN(curr.price)) ? curr.price : null;
-      const priceDelta = (currPrice !== null && prevPrice !== null)
-        ? Math.round((currPrice - prevPrice) * 100) / 100
-        : null;
-
       // КЛАССИФИКАЦИЯ СТАТУСА
       let status = 'normal';
       let statusLabel = 'В наличии';
@@ -705,18 +722,34 @@
         dropCount++;
       }
 
+      // Определение тары (Разливное / Бутылочное)
+      let pkgInfo = null;
+      if (curr.packageType) {
+        pkgInfo = {
+          type: curr.packageType,
+          subType: curr.packageSubType || curr.packageType,
+          label: curr.packageLabel || (curr.packageType === 'draft' ? 'Разливное' : 'Бутылочное'),
+          icon: curr.packageIcon || (curr.packageType === 'draft' ? '🍺' : '🍾')
+        };
+      } else if (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function') {
+        pkgInfo = window.ExcelParser.detectPackageType(curr.name, curr.rawUnit || curr.unit, curr.category);
+      } else {
+        pkgInfo = { type: 'other', subType: 'other', label: 'Товар', icon: '📦' };
+      }
+
       diffResults.push({
         status,
         statusLabel,
         code: curr.code || (prev ? prev.code : ''),
         name: curr.name,
+        packageType: pkgInfo.type,
+        packageSubType: pkgInfo.subType,
+        packageLabel: pkgInfo.label,
+        packageIcon: pkgInfo.icon,
         prevStock,
         currStock,
         stockDelta,
         stockDeltaPct,
-        prevPrice,
-        currPrice,
-        priceDelta,
         isTextStock: curr.isTextStock,
         textStockNote: curr.textStockNote
       });
@@ -725,18 +758,33 @@
     // 3. Обрабатываем позиции, которые БЫЛИ в базе с остатком > 0, но ИСЧЕЗЛИ
     for (const [key, prev] of prevMap.entries()) {
       if (!seenPrevKeys.has(key) && prev.stock > 0) {
+        let pkgInfo = null;
+        if (prev.packageType) {
+          pkgInfo = {
+            type: prev.packageType,
+            subType: prev.packageSubType || prev.packageType,
+            label: prev.packageLabel || (prev.packageType === 'draft' ? 'Разливное' : 'Бутылочное'),
+            icon: prev.packageIcon || (prev.packageType === 'draft' ? '🍺' : '🍾')
+          };
+        } else if (window.ExcelParser && typeof window.ExcelParser.detectPackageType === 'function') {
+          pkgInfo = window.ExcelParser.detectPackageType(prev.name, prev.rawUnit || prev.unit, prev.category);
+        } else {
+          pkgInfo = { type: 'other', subType: 'other', label: 'Товар', icon: '📦' };
+        }
+
         diffResults.push({
           status: 'out',
           statusLabel: 'Выбыло (нет в прайсе)',
           code: prev.code || '',
           name: prev.name,
+          packageType: pkgInfo.type,
+          packageSubType: pkgInfo.subType,
+          packageLabel: pkgInfo.label,
+          packageIcon: pkgInfo.icon,
           prevStock: prev.stock,
           currStock: 0,
           stockDelta: -prev.stock,
           stockDeltaPct: -100,
-          prevPrice: prev.price,
-          currPrice: null,
-          priceDelta: null,
           isTextStock: false,
           textStockNote: ''
         });
@@ -796,6 +844,39 @@
     dom.badgeGrowth.textContent = stats.growth;
     dom.badgeDrop.textContent = stats.drop;
     dom.badgeOut.textContent = stats.out;
+    updateSubFilterBadges();
+  }
+
+  function updateSubFilterBadges() {
+    if (!dom.subFilterRow) return;
+
+    let baseItems = state.diffItems;
+    if (state.activeFilter !== 'all') {
+      baseItems = baseItems.filter(i => i.status === state.activeFilter);
+    }
+
+    let draftCount = 0;
+    let bottleCount = 0;
+
+    for (const item of baseItems) {
+      if (item.packageType === 'draft') {
+        draftCount++;
+      } else if (item.packageType === 'bottle') {
+        bottleCount++;
+      }
+    }
+
+    if (dom.subBadgeAll) dom.subBadgeAll.textContent = baseItems.length;
+    if (dom.subBadgeDraft) dom.subBadgeDraft.textContent = draftCount;
+    if (dom.subBadgeBottle) dom.subBadgeBottle.textContent = bottleCount;
+
+    // Подфильтр отображается для вкладок 'new', 'growth' и 'all' при наличии позиций
+    const isApplicable = ['new', 'growth', 'all'].includes(state.activeFilter);
+    if (isApplicable && state.diffItems.length > 0) {
+      dom.subFilterRow.classList.add('visible');
+    } else {
+      dom.subFilterRow.classList.remove('visible');
+    }
   }
 
   // ==========================================================================
@@ -807,6 +888,11 @@
     // 1. Фильтрация по активной вкладке
     if (state.activeFilter !== 'all') {
       items = items.filter(i => i.status === state.activeFilter);
+    }
+
+    // 1.1. Фильтрация по таре (Разливное / Бутылочное)
+    if (state.subFilter !== 'all') {
+      items = items.filter(i => i.packageType === state.subFilter);
     }
 
     // 2. Поиск по строке (наименование или артикул)
@@ -838,18 +924,6 @@
     // 4. Отрисовка
     dom.tableBody.innerHTML = '';
 
-    // Проверка наличия цен в данных (динамическое скрытие колонки цен, если они не загружены)
-    const hasPrices = state.diffItems.some(i => i.currPrice !== null || i.prevPrice !== null);
-    state.hasPrices = hasPrices;
-
-    if (dom.tableWrapper) {
-      if (hasPrices) {
-        dom.tableWrapper.classList.remove('no-prices');
-      } else {
-        dom.tableWrapper.classList.add('no-prices');
-      }
-    }
-
     if (items.length === 0) {
       dom.tableEmptyState.style.display = 'flex';
       dom.footerStats.textContent = 'Показано 0 строк';
@@ -876,13 +950,29 @@
       tdCode.textContent = item.code || '—';
       tr.appendChild(tdCode);
 
-      // 3. Наименование + мобильный 2-й ярус (статус + артикул)
+      // 3. Наименование + маркер тары + мобильный 2-й ярус (статус + тара + артикул)
       const tdName = document.createElement('td');
       tdName.className = 'col-name';
+
+      let pkgBadge = '';
+      if (item.packageType === 'draft') {
+        pkgBadge = `<span class="package-badge package-draft" title="Разливное пиво (кег)">🍺 Разлив</span>`;
+      } else if (item.packageType === 'bottle') {
+        if (item.packageSubType === 'can') {
+          pkgBadge = `<span class="package-badge package-can" title="Банка (ж/б)">🥫 Банка</span>`;
+        } else {
+          pkgBadge = `<span class="package-badge package-bottle" title="Бутылочное / стекло">🍾 Бутылка</span>`;
+        }
+      }
+
       tdName.innerHTML = `
-        <div class="product-name">${item.name}</div>
+        <div class="product-name-row">
+          <span class="product-name">${item.name}</span>
+          ${pkgBadge}
+        </div>
         <div class="mobile-item-meta">
           <span class="status-badge badge-${item.status}">${item.statusLabel}</span>
+          ${pkgBadge}
           ${item.code ? `<span class="mobile-sku">Арт: ${item.code}</span>` : ''}
         </div>
       `;
@@ -924,29 +1014,6 @@
         <span class="delta-val ${deltaClass}">${sign}${item.stockDelta}${pctStr}</span>
       `;
       tr.appendChild(tdDelta);
-
-      // 7. Цена и дельта цены
-      const tdPrice = document.createElement('td');
-      tdPrice.className = 'col-price';
-      tdPrice.style.textAlign = 'right';
-
-      const hasCurrPrice = typeof item.currPrice === 'number' && !isNaN(item.currPrice);
-      const hasPrevPrice = typeof item.prevPrice === 'number' && !isNaN(item.prevPrice);
-
-      if (hasCurrPrice) {
-        let priceHtml = `<div class="price-val">${item.currPrice.toLocaleString('ru-RU')} ₽</div>`;
-        if (typeof item.priceDelta === 'number' && !isNaN(item.priceDelta) && item.priceDelta !== 0) {
-          const pSign = item.priceDelta > 0 ? '+' : '';
-          const pClass = item.priceDelta > 0 ? 'delta-negative' : 'delta-positive';
-          priceHtml += `<div class="delta-val ${pClass}" style="font-size:11px;">${pSign}${item.priceDelta} ₽</div>`;
-        }
-        tdPrice.innerHTML = priceHtml;
-      } else if (hasPrevPrice) {
-        tdPrice.innerHTML = `<span style="text-decoration:line-through;color:var(--text-muted);">${item.prevPrice.toLocaleString('ru-RU')} ₽</span>`;
-      } else {
-        tdPrice.textContent = '—';
-      }
-      tr.appendChild(tdPrice);
 
       fragment.appendChild(tr);
     });
@@ -1126,6 +1193,10 @@
       items = items.filter(i => i.status === state.activeFilter);
     }
 
+    if (state.subFilter && state.subFilter !== 'all') {
+      items = items.filter(i => i.packageType === state.subFilter);
+    }
+
     if (state.searchQuery) {
       const q = state.searchQuery.toLowerCase();
       items = items.filter(i =>
@@ -1147,13 +1218,14 @@
     const sup = state.suppliers.find(s => s.id === state.activeSupplierId);
     const supName = sup ? sup.name.replace(/[^a-zа-я0-9]/gi, '_') : 'supplier';
     const filterName = state.activeFilter;
+    const subFilterSuffix = state.subFilter !== 'all' ? `_${state.subFilter}` : '';
     const dateStr = new Date().toISOString().slice(0, 10);
 
     // Подготовка колонок для Excel таблицы
-    const hasPrices = state.hasPrices;
     const rows = items.map(item => {
-      const row = {
+      return {
         'Статус': item.statusLabel,
+        'Тара': item.packageLabel || '',
         'Артикул': item.code || '',
         'Наименование': item.name,
         'Остаток было': item.prevStock,
@@ -1161,18 +1233,13 @@
         'Дельта остатка': item.stockDelta,
         'Изменение %': item.stockDeltaPct + '%'
       };
-      if (hasPrices) {
-        row['Цена'] = item.currPrice !== null ? item.currPrice : (item.prevPrice !== null ? item.prevPrice : '');
-        row['Дельта цены'] = item.priceDelta !== null ? item.priceDelta : '';
-      }
-      return row;
     });
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Выгрузка');
 
-    const fileName = `${supName}_${filterName}_${dateStr}.xlsx`;
+    const fileName = `${supName}_${filterName}${subFilterSuffix}_${dateStr}.xlsx`;
     XLSX.writeFile(workbook, fileName);
 
     showToast(`Файл «${fileName}» сформирован (${items.length} строк)`, 'success');
@@ -1187,16 +1254,13 @@
     }
 
     // Формируем TSV (табуляция), который идеально вставляется в Excel и Google Sheets
-    const hasPrices = state.hasPrices;
-    const headers = ['Статус', 'Артикул', 'Наименование', 'Было', 'Стало', 'Изменение', 'Изм %'];
-    if (hasPrices) {
-      headers.push('Цена', 'Дельта цены');
-    }
+    const headers = ['Статус', 'Тара', 'Артикул', 'Наименование', 'Было', 'Стало', 'Изменение', 'Изм %'];
     const lines = [headers.join('\t')];
 
     items.forEach(item => {
       const parts = [
         item.statusLabel,
+        item.packageLabel || '',
         item.code || '',
         item.name,
         item.prevStock,
@@ -1204,12 +1268,6 @@
         item.stockDelta,
         item.stockDeltaPct + '%'
       ];
-      if (hasPrices) {
-        parts.push(
-          item.currPrice !== null ? item.currPrice : '',
-          item.priceDelta !== null ? item.priceDelta : ''
-        );
-      }
       lines.push(parts.join('\t'));
     });
 
@@ -1273,7 +1331,7 @@
     const rows = previewData.rows;
     const maxCols = previewData.maxCols;
 
-    const currentMapping = state.currentMapping || { nameCol: -1, stockCol: -1, codeCol: -1, priceCol: -1 };
+    const currentMapping = state.currentMapping || { nameCol: -1, stockCol: -1, codeCol: -1 };
 
     // Шапка с селекторами для каждой колонки
     dom.previewTableHead.innerHTML = '';
@@ -1288,7 +1346,6 @@
           <option value="name" ${c === currentMapping.nameCol ? 'selected' : ''}>Наименование (обяз.)</option>
           <option value="stock" ${c === currentMapping.stockCol ? 'selected' : ''}>Остаток (обяз.)</option>
           <option value="code" ${c === currentMapping.codeCol ? 'selected' : ''}>Артикул / Код</option>
-          <option value="price" ${c === currentMapping.priceCol ? 'selected' : ''}>Цена</option>
         </select>
       `;
       headerTr.appendChild(th);
@@ -1318,8 +1375,7 @@
     const newMapping = {
       nameCol: -1,
       stockCol: -1,
-      codeCol: -1,
-      priceCol: -1
+      codeCol: -1
     };
 
     selects.forEach(sel => {
@@ -1328,7 +1384,6 @@
       if (val === 'name') newMapping.nameCol = colIdx;
       if (val === 'stock') newMapping.stockCol = colIdx;
       if (val === 'code') newMapping.codeCol = colIdx;
-      if (val === 'price') newMapping.priceCol = colIdx;
     });
 
     if (newMapping.nameCol < 0) {
@@ -1756,9 +1811,22 @@
         dom.filterTabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         state.activeFilter = tab.dataset.filter;
+        updateSubFilterBadges();
         renderTable();
       });
     });
+
+    // Подфильтры по формату тары (Разливное / Бутылочное)
+    if (dom.subFilterTabs) {
+      dom.subFilterTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+          dom.subFilterTabs.forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          state.subFilter = tab.dataset.subFilter;
+          renderTable();
+        });
+      });
+    }
 
     // Поиск
     dom.searchInput.addEventListener('input', (e) => {

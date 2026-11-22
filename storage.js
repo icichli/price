@@ -709,11 +709,13 @@ class StorageManager {
         name: String(item.name || '').trim(),
         stock: typeof item.stock === 'number' ? item.stock : (parseFloat(item.stock) || 0),
         code: item.code ? String(item.code).trim() : '',
-        price: (item.price !== null && item.price !== undefined && item.price !== '')
-          ? (typeof item.price === 'number' ? item.price : (parseFloat(item.price) || null))
-          : null,
         isTextStock: Boolean(item.isTextStock),
-        textStockNote: item.textStockNote ? String(item.textStockNote).trim() : ''
+        textStockNote: item.textStockNote ? String(item.textStockNote).trim() : '',
+        packageType: item.packageType || '',
+        packageSubType: item.packageSubType || '',
+        packageLabel: item.packageLabel || '',
+        packageIcon: item.packageIcon || '',
+        category: item.category || ''
       };
       return clean;
     });
@@ -723,14 +725,15 @@ class StorageManager {
     if (!Array.isArray(items)) return [];
     return items.map(i => {
       // 1. Простейший кортеж: [name, stock]
-      if (!i.code && (i.price === null || i.price === undefined) && !i.isTextStock) {
+      if (!i.code && !i.isTextStock && !i.packageType) {
         return [i.name, i.stock];
       }
-      // 2. Кортеж с доп. полями: [name, stock, code, price, isTextStock, textStockNote]
-      const arr = [i.name, i.stock, i.code || '', (typeof i.price === 'number' && !isNaN(i.price)) ? i.price : null];
-      if (i.isTextStock) {
-        arr.push(1);
+      // 2. Кортеж: [name, stock, code, isTextStock ? 1 : 0, textStockNote, packageType]
+      const arr = [i.name, i.stock, i.code || ''];
+      if (i.isTextStock || i.packageType) {
+        arr.push(i.isTextStock ? 1 : 0);
         arr.push(i.textStockNote || '');
+        arr.push(i.packageType || '');
       }
       return arr;
     });
@@ -744,22 +747,22 @@ class StorageManager {
           name: i[0] || '',
           stock: typeof i[1] === 'number' ? i[1] : (parseFloat(i[1]) || 0),
           code: i[2] || '',
-          price: (i[3] !== undefined && i[3] !== null && i[3] !== '')
-            ? (typeof i[3] === 'number' ? i[3] : (parseFloat(i[3]) || null))
-            : null,
-          isTextStock: i[4] === 1,
-          textStockNote: i[5] || ''
+          isTextStock: i[3] === 1 || i[4] === 1,
+          textStockNote: (typeof i[4] === 'string' ? i[4] : (typeof i[5] === 'string' ? i[5] : '')),
+          packageType: i[5] && typeof i[5] === 'string' && ['draft', 'bottle', 'other'].includes(i[5]) ? i[5] : ''
         };
       }
       return {
         name: i.name || '',
         stock: typeof i.stock === 'number' ? i.stock : (parseFloat(i.stock) || 0),
         code: i.code || '',
-        price: (i.price !== undefined && i.price !== null && i.price !== '')
-          ? (typeof i.price === 'number' ? i.price : (parseFloat(i.price) || null))
-          : null,
         isTextStock: Boolean(i.isTextStock),
-        textStockNote: i.textStockNote || ''
+        textStockNote: i.textStockNote || '',
+        packageType: i.packageType || '',
+        packageSubType: i.packageSubType || '',
+        packageLabel: i.packageLabel || '',
+        packageIcon: i.packageIcon || '',
+        category: i.category || ''
       };
     });
   }
