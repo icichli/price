@@ -100,6 +100,7 @@
 
     btnCommitSnapshot: document.getElementById('btnCommitSnapshot'),
     btnRollbackSnapshot: document.getElementById('btnRollbackSnapshot'),
+    btnClearSnapshot: document.getElementById('btnClearSnapshot'),
     btnExportMenuToggle: document.getElementById('btnExportMenuToggle'),
     exportDropdownMenu: document.getElementById('exportDropdownMenu'),
     btnExportExcel: document.getElementById('btnExportExcel'),
@@ -358,20 +359,28 @@
 
   function updateBaselineInfo() {
     const sup = state.suppliers.find(s => s.id === state.activeSupplierId);
-    const dateStr = state.baselineSnapshot.updatedAt
+    const hasData = state.baselineSnapshot && state.baselineSnapshot.current && state.baselineSnapshot.current.length > 0;
+    const dateStr = (state.baselineSnapshot && state.baselineSnapshot.updatedAt)
       ? new Date(state.baselineSnapshot.updatedAt).toLocaleString('ru-RU')
       : 'нет данных';
 
-    const count = (state.baselineSnapshot.current || []).length;
-    const infoText = `База: ${count} поз. (от ${dateStr})`;
+    const count = hasData ? state.baselineSnapshot.current.length : 0;
+    const infoText = hasData ? `База: ${count} поз. (от ${dateStr})` : 'База: пустая (нет данных)';
     
     dom.loadedFileBaseline.textContent = infoText;
     dom.footerBaselineInfo.textContent = `Эталон: ${sup ? sup.name : ''} | ${infoText}`;
   }
 
   function updateRollbackButtonState() {
-    const hasPrevious = state.baselineSnapshot.previous && state.baselineSnapshot.previous.length > 0;
-    dom.btnRollbackSnapshot.disabled = !hasPrevious;
+    const hasPrevious = state.baselineSnapshot && state.baselineSnapshot.previous && state.baselineSnapshot.previous.length > 0;
+    const hasCurrent = state.baselineSnapshot && state.baselineSnapshot.current && state.baselineSnapshot.current.length > 0;
+
+    if (dom.btnRollbackSnapshot) {
+      dom.btnRollbackSnapshot.disabled = !hasPrevious;
+    }
+    if (dom.btnClearSnapshot) {
+      dom.btnClearSnapshot.disabled = !(hasCurrent || hasPrevious);
+    }
   }
 
   function openAddSupplierModal() {
@@ -1026,7 +1035,60 @@
     } catch (err) {
       showToast('Ошибка при откате базы: ' + err.message, 'error');
     } finally {
-      dom.btnRollbackSnapshot.disabled = false;
+      updateRollbackButtonState();
+    }
+  }
+
+  async function clearSnapshot() {
+    if (!state.activeSupplierId) return;
+
+    const sup = state.suppliers.find(s => s.id === state.activeSupplierId);
+    const supName = sup ? sup.name : 'поставщика';
+
+    const confirmed = confirm(
+      `Вы действительно хотите полностью очистить базу остатков для поставщика «${supName}»?\n\n` +
+      `Все зафиксированные остатки (текущие и предыдущие) будут безвозвратно удалены из браузера и Google Таблицы.`
+    );
+    if (!confirmed) return;
+
+    try {
+      if (dom.btnClearSnapshot) dom.btnClearSnapshot.disabled = true;
+      if (dom.btnRollbackSnapshot) dom.btnRollbackSnapshot.disabled = true;
+      showToast('Очистка базы в IndexedDB и Google Sheets...', 'info');
+
+      // 1. Локальная очистка в IndexedDB
+      const clearedRecord = await window.PriceStorage.clearLocalSnapshot(state.activeSupplierId);
+      state.baselineSnapshot = clearedRecord;
+
+      // 2. Сброс состояния в памяти
+      state.parsedItems = [];
+      state.currentWorkbook = null;
+      state.currentSheetData = [];
+      state.currentFileName = '';
+      state.diffItems = [];
+      dom.fileInput.value = '';
+
+      if (sup && sup.mapping) {
+        delete sup.mapping.lastFileName;
+        delete sup.mapping.lastCommitTime;
+      }
+
+      // 3. Очистка в облаке Google Sheets
+      await window.PriceStorage.clearSnapshotInCloud(state.activeSupplierId, supName);
+
+      // 4. Сброс UI
+      dom.fileCard.classList.remove('visible');
+      updateBadges({ all: 0, new: 0, growth: 0, drop: 0, out: 0 });
+      updateBaselineInfo();
+      updateRollbackButtonState();
+      renderTable();
+
+      showToast(`База для поставщика «${supName}» успешно очищена!`, 'success');
+
+    } catch (err) {
+      console.error('Clear snapshot error:', err);
+      showToast('Ошибка при очистке базы: ' + err.message, 'error');
+      updateRollbackButtonState();
     }
   }
 
@@ -1669,6 +1731,9 @@
     // Кнопки действий
     dom.btnCommitSnapshot.addEventListener('click', commitSnapshot);
     dom.btnRollbackSnapshot.addEventListener('click', rollbackSnapshot);
+    if (dom.btnClearSnapshot) {
+      dom.btnClearSnapshot.addEventListener('click', clearSnapshot);
+    }
 
     // Меню выгрузки
     dom.btnExportMenuToggle.addEventListener('click', toggleExportDropdown);

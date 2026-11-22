@@ -212,6 +212,32 @@ class StorageManager {
     return updatedRecord;
   }
 
+  /**
+   * Локальная очистка снимка остатков поставщика (сброс текущих и предыдущих остатков)
+   */
+  async clearLocalSnapshot(supplierId) {
+    const emptyRecord = {
+      supplierId: supplierId,
+      current: [],
+      previous: [],
+      updatedAt: null
+    };
+
+    await this.saveSnapshotRecord(emptyRecord);
+
+    const supplier = await this.getSupplier(supplierId);
+    if (supplier) {
+      supplier.updatedAt = null;
+      if (supplier.mapping) {
+        delete supplier.mapping.lastFileName;
+        delete supplier.mapping.lastCommitTime;
+      }
+      await this.saveSupplier(supplier);
+    }
+
+    return emptyRecord;
+  }
+
   // ==========================================
   // LOCALSTORAGE (НАСТРОЙКИ UI И ОБЛАКА)
   // ==========================================
@@ -508,6 +534,75 @@ class StorageManager {
 
     } catch (err) {
       this._notifyStatus('error', 'Ошибка отката в облаке: ' + err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * Очистка базы остатков поставщика в Google Apps Script (POST)
+   */
+  async clearSnapshotInCloud(supplierId, supplierName = '') {
+    const { url, token } = this.getCloudConfig();
+    if (!url || !token) return null;
+
+    try {
+      this._notifyStatus('syncing', 'Очистка базы в Google Таблице...');
+
+      // 1. Попытка вызвать специализированное действие clear_snapshot
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify({
+          action: 'clear_snapshot',
+          token: token.trim(),
+          supplierId
+        })
+      });
+
+      const res = await response.json();
+      if (res.success) {
+        this._notifyStatus('synced', 'База в облаке очищена');
+        return res;
+      }
+
+      // 2. Fallback для обратной совместимости со старыми развертываниями Code.gs
+      if (res.error && res.error.includes('Неизвестное действие')) {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'save_snapshot',
+            token: token.trim(),
+            supplierId,
+            supplierName: supplierName || 'Поставщик',
+            mapping: null,
+            snapshot: []
+          })
+        });
+        const fbRes = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'save_snapshot',
+            token: token.trim(),
+            supplierId,
+            supplierName: supplierName || 'Поставщик',
+            mapping: null,
+            snapshot: []
+          })
+        });
+        const fbJson = await fbRes.json();
+        this._notifyStatus('synced', 'База в облаке очищена');
+        return fbJson;
+      }
+
+      throw new Error(res.error || 'Ошибка очистки базы в Google Apps Script');
+
+    } catch (err) {
+      console.error('Clear cloud snapshot failed:', err);
+      this._notifyStatus('error', 'Ошибка очистки в облаке: ' + err.message);
       throw err;
     }
   }

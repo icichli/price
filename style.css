@@ -710,6 +710,12 @@ body {
 
 .btn-danger-outline:hover:not(:disabled) {
   background: var(--danger-bg);
+  border-color: var(--danger-text);
+}
+
+.btn-danger-outline:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Dropdown Menu Wrapper */

@@ -286,6 +286,42 @@ function doPost(e) {
       });
     }
     
+    // 3.1. Очистка базы снимка поставщика (clear_snapshot)
+    if (action === 'clear_snapshot') {
+      const supplierId = String(payload.supplierId || '');
+      if (!supplierId) {
+        return createJsonResponse({ success: false, error: 'supplierId обязателен' });
+      }
+      
+      let targetRowIndex = -1;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === supplierId) {
+          targetRowIndex = i + 1;
+          break;
+        }
+      }
+      
+      if (targetRowIndex > 0) {
+        sheet.getRange(targetRowIndex, 3).setValue('');
+        sheet.getRange(targetRowIndex, 5).setValue('[]');
+        sheet.getRange(targetRowIndex, 6).setValue('[]');
+        
+        // Очищаем lastFileName в MappingJSON, если он был сохранен
+        let mapping = null;
+        try { mapping = data[targetRowIndex - 1][3] ? JSON.parse(data[targetRowIndex - 1][3]) : null; } catch (e) {}
+        if (mapping) {
+          delete mapping.lastFileName;
+          delete mapping.lastCommitTime;
+          sheet.getRange(targetRowIndex, 4).setValue(JSON.stringify(mapping));
+        }
+      }
+      
+      return createJsonResponse({
+        success: true,
+        message: 'База остатков поставщика успешно очищена в Google Sheets'
+      });
+    }
+    
     // 4. Управление поставщиками (создание, переименование, удаление)
     if (action === 'manage_supplier') {
       const subAction = payload.subAction; // 'create', 'rename', 'delete'
