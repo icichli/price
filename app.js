@@ -759,6 +759,18 @@
     // 4. Отрисовка
     dom.tableBody.innerHTML = '';
 
+    // Проверка наличия цен в данных (динамическое скрытие колонки цен, если они не загружены)
+    const hasPrices = state.diffItems.some(i => i.currPrice !== null || i.prevPrice !== null);
+    state.hasPrices = hasPrices;
+
+    if (dom.tableWrapper) {
+      if (hasPrices) {
+        dom.tableWrapper.classList.remove('no-prices');
+      } else {
+        dom.tableWrapper.classList.add('no-prices');
+      }
+    }
+
     if (items.length === 0) {
       dom.tableEmptyState.style.display = 'flex';
       dom.footerStats.textContent = 'Показано 0 строк';
@@ -773,38 +785,47 @@
     items.forEach(item => {
       const tr = document.createElement('tr');
 
-      // Статус
+      // 1. Статус
       const tdStatus = document.createElement('td');
+      tdStatus.className = 'col-status';
       tdStatus.innerHTML = `<span class="status-badge badge-${item.status}">${item.statusLabel}</span>`;
       tr.appendChild(tdStatus);
 
-      // Артикул
+      // 2. Артикул
       const tdCode = document.createElement('td');
+      tdCode.className = 'col-code cell-code';
       tdCode.textContent = item.code || '—';
-      tdCode.style.color = 'var(--text-secondary)';
-      tdCode.style.fontSize = '12px';
       tr.appendChild(tdCode);
 
-      // Наименование
+      // 3. Наименование + мобильный 2-й ярус (статус + артикул)
       const tdName = document.createElement('td');
-      tdName.textContent = item.name;
-      tdName.style.fontWeight = '500';
+      tdName.className = 'col-name';
+      tdName.innerHTML = `
+        <div class="product-name">${item.name}</div>
+        <div class="mobile-item-meta">
+          <span class="status-badge badge-${item.status}">${item.statusLabel}</span>
+          ${item.code ? `<span class="mobile-sku">Арт: ${item.code}</span>` : ''}
+        </div>
+      `;
       tr.appendChild(tdName);
 
-      // Было
+      // 4. Было
       const tdPrev = document.createElement('td');
+      tdPrev.className = 'col-prev';
       tdPrev.style.textAlign = 'right';
       tdPrev.textContent = item.prevStock;
       tr.appendChild(tdPrev);
 
-      // Стало
+      // 5. Стало
       const tdCurr = document.createElement('td');
+      tdCurr.className = 'col-curr';
       tdCurr.style.textAlign = 'right';
       tdCurr.innerHTML = `${item.currStock}${item.isTextStock ? `<span class="text-stock-tag" title="Текстовый маркер">${item.textStockNote}</span>` : ''}`;
       tr.appendChild(tdCurr);
 
-      // Изменение
+      // 6. Изменение остатка (на мобильном: 1-й ярус "Было ➔ Стало", 2-й ярус Дельта)
       const tdDelta = document.createElement('td');
+      tdDelta.className = 'col-delta';
       tdDelta.style.textAlign = 'right';
 
       let deltaClass = 'delta-neutral';
@@ -817,19 +838,25 @@
       }
 
       const pctStr = item.stockDeltaPct !== 0 ? ` (${sign}${item.stockDeltaPct}%)` : '';
-      tdDelta.innerHTML = `<span class="delta-val ${deltaClass}">${sign}${item.stockDelta}${pctStr}</span>`;
+      const textStockBadge = item.isTextStock ? `<span class="text-stock-tag">${item.textStockNote}</span>` : '';
+
+      tdDelta.innerHTML = `
+        <div class="mobile-stock-flow">${item.prevStock} ➔ ${item.currStock}${textStockBadge}</div>
+        <span class="delta-val ${deltaClass}">${sign}${item.stockDelta}${pctStr}</span>
+      `;
       tr.appendChild(tdDelta);
 
-      // Цена и дельта цены
+      // 7. Цена и дельта цены
       const tdPrice = document.createElement('td');
+      tdPrice.className = 'col-price';
       tdPrice.style.textAlign = 'right';
 
       if (item.currPrice !== null) {
-        let priceHtml = `${item.currPrice.toLocaleString('ru-RU')} ₽`;
+        let priceHtml = `<div class="price-val">${item.currPrice.toLocaleString('ru-RU')} ₽</div>`;
         if (item.priceDelta !== null && item.priceDelta !== 0) {
           const pSign = item.priceDelta > 0 ? '+' : '';
-          const pClass = item.priceDelta > 0 ? 'delta-negative' : 'delta-positive'; // рост цены обычно красный
-          priceHtml += ` <br><span class="delta-val ${pClass}" style="font-size:11px;">${pSign}${item.priceDelta} ₽</span>`;
+          const pClass = item.priceDelta > 0 ? 'delta-negative' : 'delta-positive';
+          priceHtml += `<div class="delta-val ${pClass}" style="font-size:11px;">${pSign}${item.priceDelta} ₽</div>`;
         }
         tdPrice.innerHTML = priceHtml;
       } else if (item.prevPrice !== null) {
@@ -967,17 +994,23 @@
     const dateStr = new Date().toISOString().slice(0, 10);
 
     // Подготовка колонок для Excel таблицы
-    const rows = items.map(item => ({
-      'Статус': item.statusLabel,
-      'Артикул': item.code || '',
-      'Наименование': item.name,
-      'Остаток было': item.prevStock,
-      'Остаток стало': item.currStock,
-      'Дельта остатка': item.stockDelta,
-      'Изменение %': item.stockDeltaPct + '%',
-      'Цена': item.currPrice !== null ? item.currPrice : (item.prevPrice !== null ? item.prevPrice : ''),
-      'Дельта цены': item.priceDelta !== null ? item.priceDelta : ''
-    }));
+    const hasPrices = state.hasPrices;
+    const rows = items.map(item => {
+      const row = {
+        'Статус': item.statusLabel,
+        'Артикул': item.code || '',
+        'Наименование': item.name,
+        'Остаток было': item.prevStock,
+        'Остаток стало': item.currStock,
+        'Дельта остатка': item.stockDelta,
+        'Изменение %': item.stockDeltaPct + '%'
+      };
+      if (hasPrices) {
+        row['Цена'] = item.currPrice !== null ? item.currPrice : (item.prevPrice !== null ? item.prevPrice : '');
+        row['Дельта цены'] = item.priceDelta !== null ? item.priceDelta : '';
+      }
+      return row;
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
     const workbook = XLSX.utils.book_new();
@@ -998,21 +1031,30 @@
     }
 
     // Формируем TSV (табуляция), который идеально вставляется в Excel и Google Sheets
-    const headers = ['Статус', 'Артикул', 'Наименование', 'Было', 'Стало', 'Изменение', 'Изм %', 'Цена', 'Дельта цены'];
+    const hasPrices = state.hasPrices;
+    const headers = ['Статус', 'Артикул', 'Наименование', 'Было', 'Стало', 'Изменение', 'Изм %'];
+    if (hasPrices) {
+      headers.push('Цена', 'Дельта цены');
+    }
     const lines = [headers.join('\t')];
 
     items.forEach(item => {
-      lines.push([
+      const parts = [
         item.statusLabel,
         item.code || '',
         item.name,
         item.prevStock,
         item.currStock,
         item.stockDelta,
-        item.stockDeltaPct + '%',
-        item.currPrice !== null ? item.currPrice : '',
-        item.priceDelta !== null ? item.priceDelta : ''
-      ].join('\t'));
+        item.stockDeltaPct + '%'
+      ];
+      if (hasPrices) {
+        parts.push(
+          item.currPrice !== null ? item.currPrice : '',
+          item.priceDelta !== null ? item.priceDelta : ''
+        );
+      }
+      lines.push(parts.join('\t'));
     });
 
     const textToCopy = lines.join('\n');

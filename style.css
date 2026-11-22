@@ -889,6 +889,45 @@ body {
   margin-left: 4px;
 }
 
+/* ==========================================================================
+   СТИЛИ ЯЧЕЕК ТАБЛИЦЫ И ДИНАМИЧЕСКОГО СКРЫТИЯ ЦЕНЫ
+   ========================================================================== */
+.product-name {
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.cell-code {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.price-val {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Элементы 2-го яруса для мобильной версии (на десктопе скрыты) */
+.mobile-header-title {
+  display: none;
+}
+.desktop-header-title {
+  display: inline;
+}
+.mobile-item-meta {
+  display: none;
+}
+.mobile-stock-flow {
+  display: none;
+}
+
+/* Если цены в данных отсутствуют — колонка цены полностью скрывается везде */
+.table-wrapper.no-prices .col-price {
+  display: none !important;
+}
+
 .table-footer {
   padding: 12px 16px;
   background: var(--bg-tertiary);
@@ -1186,46 +1225,263 @@ body {
 }
 
 /* ==========================================================================
-   RESPONSIVENESS (АДАПТИВНОСТЬ)
+   RESPONSIVENESS (АДАПТИВНОСТЬ: ВАРИАНТ 2 ДЛЯ СМАРТФОНОВ)
    ========================================================================== */
 @media (max-width: 768px) {
   .app-wrapper {
-    padding: 12px 12px 40px;
-    gap: 14px;
+    padding: 8px 8px 36px;
+    gap: 10px;
   }
 
   .header {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
+    padding: 12px 14px;
   }
 
   .header-actions {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: 6px;
+    flex-wrap: wrap;
   }
 
+  .header-actions .icon-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  /* Вкладки поставщиков с горизонтальным свайпом */
+  .suppliers-bar {
+    padding: 4px;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .suppliers-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Компактная зона загрузки на телефоне */
+  .dropzone {
+    padding: 16px 12px;
+    gap: 4px;
+  }
+  .dropzone-icon {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 2px;
+  }
+  .dropzone-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+  .dropzone-title {
+    font-size: 14px;
+  }
+  .dropzone-desc {
+    font-size: 12px;
+  }
+
+  /* Компактная полоса порогов фильтрации */
   .controls-card {
+    padding: 10px 12px;
+    gap: 8px;
     flex-direction: column;
     align-items: stretch;
   }
+  .thresholds-group {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    width: 100%;
+  }
+  .threshold-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    font-size: 11px;
+  }
+  .threshold-item label {
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .threshold-input {
+    width: 100%;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
 
+  /* Вкладки-фильтры (горизонтальная прокрутка) */
+  .filter-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    width: 100%;
+  }
+  .filter-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .filter-tab {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* Поиск и кнопки действий на всю ширину */
   .actions-row {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
-
   .search-box {
     max-width: 100%;
+    width: 100%;
   }
-
   .main-actions-group {
-    justify-content: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
   }
-
   .main-actions-group .btn {
-    flex: 1;
+    width: 100%;
+    justify-content: center;
+    height: 42px;
+    font-size: 13px;
+  }
+  .dropdown-container {
+    width: 100%;
+  }
+  .dropdown-container .btn {
+    width: 100%;
+    justify-content: center;
   }
 
-  .data-table th, .data-table td {
-    padding: 8px 10px;
+  /* ==========================================================================
+     ТАБЛИЦА ВАРИАНТ 2: 2-ЯРУСНАЯ СЕТКА НА 100% ШИРИНЫ ЭКРАНА
+     ========================================================================== */
+  .table-wrapper {
+    overflow-x: hidden; /* Никакого горизонтального скролла */
+    max-height: calc(100vh - 250px);
+  }
+
+  .data-table {
+    width: 100%;
+    table-layout: fixed;
+  }
+
+  /* Переключение заголовков */
+  .desktop-header-title {
+    display: none;
+  }
+  .mobile-header-title {
+    display: inline;
+  }
+
+  /* Скрываем раздельные десктопные колонки */
+  .data-table th.col-status,
+  .data-table td.col-status,
+  .data-table th.col-code,
+  .data-table td.col-code,
+  .data-table th.col-prev,
+  .data-table td.col-prev,
+  .data-table th.col-curr,
+  .data-table td.col-curr {
+    display: none !important;
+  }
+
+  /* 1. Если ЦЕНЫ СКРЫТЫ (2 колонки: Товар + Остаток) */
+  .table-wrapper.no-prices .data-table th.col-name,
+  .table-wrapper.no-prices .data-table td.col-name {
+    width: 65% !important;
+    padding: 9px 8px;
+  }
+  .table-wrapper.no-prices .data-table th.col-delta,
+  .table-wrapper.no-prices .data-table td.col-delta {
+    width: 35% !important;
+    padding: 9px 8px;
+    text-align: right;
+  }
+
+  /* 2. Если ЦЕНЫ ЗАГРУЖЕНЫ (3 колонки: Товар + Остаток + Цена) */
+  .data-table th.col-name,
+  .data-table td.col-name {
+    width: 52% !important;
+    padding: 8px 8px;
+  }
+  .data-table th.col-delta,
+  .data-table td.col-delta {
+    width: 26% !important;
+    padding: 8px 6px;
+    text-align: right;
+  }
+  .data-table th.col-price,
+  .data-table td.col-price {
+    width: 22% !important;
+    padding: 8px 8px 8px 4px;
+    text-align: right;
+  }
+
+  .data-table th {
+    font-size: 11px;
+    padding: 8px 8px;
+    white-space: nowrap;
+  }
+  .data-table td {
+    font-size: 12px;
+    vertical-align: top;
+  }
+
+  /* Мобильный 2-й ярус в ячейке Товар */
+  .product-name {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .mobile-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 3px;
+    flex-wrap: wrap;
+  }
+  .mobile-item-meta .status-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    font-weight: 600;
+  }
+  .mobile-sku {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* Мобильный 1-й ярус в ячейке Остаток ("Было ➔ Стало") */
+  .mobile-stock-flow {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+    white-space: nowrap;
+  }
+
+  .delta-val {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .price-val {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 }
