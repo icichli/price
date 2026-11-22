@@ -254,32 +254,17 @@
       const tab = document.createElement('div');
       tab.className = `supplier-tab ${sup.id === state.activeSupplierId ? 'active' : ''}`;
       tab.dataset.id = sup.id;
+      tab.title = 'Нажмите для переключения, удерживайте для переименования';
 
       const nameSpan = document.createElement('span');
+      nameSpan.className = 'supplier-tab-name';
       nameSpan.textContent = sup.name;
-      nameSpan.title = 'Нажмите для переключения';
       tab.appendChild(nameSpan);
-
-      // Иконка переименования
-      const editIcon = document.createElement('span');
-      editIcon.className = 'tab-action-icon';
-      editIcon.title = 'Переименовать поставщика';
-      editIcon.innerHTML = `
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 20h9"></path>
-          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-        </svg>
-      `;
-      editIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openEditSupplierModal(sup);
-      });
-      tab.appendChild(editIcon);
 
       // Иконка удаления (если поставщиков больше 1)
       if (state.suppliers.length > 1) {
         const delIcon = document.createElement('span');
-        delIcon.className = 'tab-action-icon';
+        delIcon.className = 'tab-action-icon tab-delete-icon';
         delIcon.title = 'Удалить поставщика';
         delIcon.innerHTML = `
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -294,7 +279,90 @@
         tab.appendChild(delIcon);
       }
 
-      tab.addEventListener('click', () => switchSupplier(sup.id));
+      // Логика удержания (long-press) для переименования поставщика без иконки карандаша
+      let pressTimer = null;
+      let isLongPress = false;
+      let startX = 0;
+      let startY = 0;
+
+      const startPress = (e) => {
+        // Игнорируем правую кнопку мыши или клик по кнопке удаления
+        if (e.button && e.button !== 0) return;
+        if (e.target.closest('.tab-delete-icon')) return;
+
+        isLongPress = false;
+        startX = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        startY = e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+
+        tab.classList.add('holding');
+
+        pressTimer = setTimeout(() => {
+          isLongPress = true;
+          tab.classList.remove('holding');
+          if (navigator.vibrate) {
+            try { navigator.vibrate(40); } catch (_) {}
+          }
+          openEditSupplierModal(sup);
+        }, 500);
+      };
+
+      const cancelPress = () => {
+        tab.classList.remove('holding');
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      };
+
+      const movePress = (e) => {
+        if (!pressTimer) return;
+        const currentX = e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        const currentY = e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        // Если палец/курсор сместился более чем на 8px (скролл ленты вкладок), отменяем удержание
+        if (Math.abs(currentX - startX) > 8 || Math.abs(currentY - startY) > 8) {
+          cancelPress();
+        }
+      };
+
+      // Мышь
+      tab.addEventListener('mousedown', startPress);
+      tab.addEventListener('mouseup', cancelPress);
+      tab.addEventListener('mouseleave', cancelPress);
+      tab.addEventListener('mousemove', movePress);
+
+      // Сенсорные экраны
+      tab.addEventListener('touchstart', startPress, { passive: true });
+      tab.addEventListener('touchend', cancelPress, { passive: true });
+      tab.addEventListener('touchcancel', cancelPress, { passive: true });
+      tab.addEventListener('touchmove', movePress, { passive: true });
+
+      // Предотвращение контекстного меню при долгом тапе
+      tab.addEventListener('contextmenu', (e) => {
+        if (isLongPress) {
+          e.preventDefault();
+        }
+      });
+
+      // Переименование по двойному клику на ПК
+      tab.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.tab-delete-icon')) return;
+        e.preventDefault();
+        cancelPress();
+        openEditSupplierModal(sup);
+      });
+
+      // Обычный короткий клик - переключение поставщика
+      tab.addEventListener('click', (e) => {
+        if (isLongPress) {
+          e.preventDefault();
+          e.stopPropagation();
+          isLongPress = false;
+          return;
+        }
+        if (e.target.closest('.tab-delete-icon')) return;
+        switchSupplier(sup.id);
+      });
+
       dom.supplierTabsContainer.appendChild(tab);
     });
   }
