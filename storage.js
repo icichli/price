@@ -10,6 +10,10 @@ class StorageManager {
     this.syncListeners = [];
     this.syncStatus = 'offline'; // 'synced' | 'syncing' | 'offline' | 'error' | 'unconfigured'
     this.lastSyncMessage = '';
+    this.isSyncing = false;
+    this.isMutating = false;
+    this.lastSyncAt = 0;
+    this.SYNC_COOLDOWN_MS = 10000;
     // Предустановленный URL Google Apps Script для автоматического подключения
     this.DEFAULT_CLOUD_URL = 'https://script.google.com/macros/s/AKfycbzbltwk1a7gvStn-K0F82UVn3kqtnJzYSQOhZSVyPIen8Mtap0_QYkfMZGzLLmFpuUGrA/exec';
   }
@@ -175,7 +179,9 @@ class StorageManager {
       supplierId: supplierId,
       current: sanitizedItems,
       previous: (existing.current && existing.current.length > 0) ? existing.current : (existing.previous || []),
-      updatedAt: nowIso
+      updatedAt: nowIso,
+      syncPending: true,
+      clearedLocally: false
     };
 
     await this.saveSnapshotRecord(updatedRecord);
@@ -205,7 +211,9 @@ class StorageManager {
       supplierId: supplierId,
       current: existing.previous,
       previous: [], // очищаем после отката
-      updatedAt: nowIso
+      updatedAt: nowIso,
+      syncPending: true,
+      clearedLocally: false
     };
 
     await this.saveSnapshotRecord(updatedRecord);
@@ -228,7 +236,9 @@ class StorageManager {
       supplierId: supplierId,
       current: [],
       previous: [],
-      updatedAt: nowIso
+      updatedAt: nowIso,
+      syncPending: true,
+      clearedLocally: true
     };
 
     await this.saveSnapshotRecord(emptyRecord);
@@ -244,6 +254,31 @@ class StorageManager {
     }
 
     return emptyRecord;
+  }
+
+  /**
+   * Фиксация серверного timestamp и снятие флага syncPending после успешной записи в Google Sheets
+   */
+  async markSnapshotSynced(supplierId, serverUpdatedAt) {
+    const existing = await this.getSnapshotRecord(supplierId);
+    const syncedAt = serverUpdatedAt || existing.updatedAt || new Date().toISOString();
+
+    await this.saveSnapshotRecord({
+      supplierId: supplierId,
+      current: existing.current || [],
+      previous: existing.previous || [],
+      updatedAt: syncedAt,
+      syncPending: false,
+      clearedLocally: false
+    });
+
+    const supplier = await this.getSupplier(supplierId);
+    if (supplier) {
+      supplier.updatedAt = syncedAt;
+      await this.saveSupplier(supplier);
+    }
+
+    return syncedAt;
   }
 
   // ==========================================
@@ -398,6 +433,15 @@ class StorageManager {
   }
 
   /**
+   * Безопасный парсинг временной метки (возвращает 0 при пустом или некорректном значении)
+   */
+  _parseTimestampMs(val) {
+    if (!val) return 0;
+    const ms = new Date(val).getTime();
+    return isNaN(ms) ? 0 : ms;
+  }
+
+  /**
    * Фоновый запрос свежей базы из Google Apps Script (GET)
    * @param {boolean} force - принудительное обновление локальной базы данными из облака
    */
@@ -413,6 +457,12 @@ class StorageManager {
       return { hasUpdates: false, offline: true };
     }
 
+    // Защита от параллельных вызовов синхронизации (гонок)
+    if (this.isSyncing) {
+      return { hasUpdates: false, skipped: true };
+    }
+
+    this.isSyncing = true;
     try {
       this._notifyStatus('syncing', 'Синхронизация с облаком...');
 
@@ -430,43 +480,96 @@ class StorageManager {
 
       let hasUpdates = false;
       const remoteSuppliers = res.suppliers || [];
+      const remoteIds = new Set();
 
       for (const remote of remoteSuppliers) {
+        remoteIds.add(remote.id);
+
         const localSup = await this.getSupplier(remote.id);
         const localSnap = await this.getSnapshotRecord(remote.id);
 
-        const remoteTime = remote.updatedAt ? new Date(remote.updatedAt).getTime() : 0;
-        const localTime = (localSnap && localSnap.updatedAt) ? new Date(localSnap.updatedAt).getTime() : 0;
-        const localHasData = Boolean(localSnap && localSnap.current && localSnap.current.length > 0);
-        const remoteHasData = Boolean(remote.currentSnapshot && remote.currentSnapshot.length > 0);
+        const currentDecompacted = this._decompactSnapshot(remote.currentSnapshot || []);
+        const previousDecompacted = this._decompactSnapshot(remote.previousSnapshot || []);
 
-        // 1. Автоматическая синхронизация локальной базы в облако:
-        // Если локально есть база, а в облаке пусто или локальный снимок новее облачного
-        // (например, на телефоне зафиксировали базу, но из-за сбоя сети она осталась только локально) —
-        // отправляем локальную базу в облако, чтобы другие устройства ее получили!
-        if (!force && localHasData && (localTime > remoteTime || (!remoteHasData && remoteTime === 0))) {
+        const remoteTime = this._parseTimestampMs(remote.updatedAt);
+        const localTime = this._parseTimestampMs(localSnap && localSnap.updatedAt);
+        const localHasData = Boolean(localSnap && localSnap.current && localSnap.current.length > 0);
+        const remoteHasData = currentDecompacted.length > 0;
+        const localPending = Boolean(localSnap && localSnap.syncPending);
+        const localCleared = Boolean(localSnap && localSnap.clearedLocally);
+        const remoteCorrupted = Boolean(remote.corruptedCurrent);
+
+        // 0. Защита от повреждения JSON в облаке: не затираем валидную локальную базу пустотой!
+        if (remoteCorrupted) {
+          console.warn(`Cloud snapshot for ${remote.id} appears corrupted. Keeping local copy.`);
+          if (!force && localHasData) {
+            try {
+              await this.syncSnapshotToCloud(
+                remote.id,
+                localSup ? localSup.name : remote.name,
+                localSup ? localSup.mapping : remote.mapping,
+                localSnap.current,
+                { previousSnapshot: localSnap.previous || [], syncMode: 'sync' }
+              );
+            } catch (healErr) {
+              console.warn('Auto-heal corrupted cloud snapshot failed:', healErr);
+            }
+          }
+          continue;
+        }
+
+        // 1. Явная синхронизация несохраненных локальных изменений в облако (только при syncPending
+        // или если в облаке вообще никогда не было данных). Никогда не пушим вслепую из-за разницы часов!
+        if (!force && localPending) {
+          if (localCleared && localTime >= remoteTime) {
+            try {
+              await this.clearSnapshotInCloud(remote.id, localSup ? localSup.name : remote.name);
+            } catch (clearErr) {
+              console.warn('Auto-push local clear to cloud failed:', clearErr);
+            }
+            continue;
+          }
+          if (localHasData && (localTime >= remoteTime || !remoteHasData)) {
+            try {
+              await this.syncSnapshotToCloud(
+                remote.id,
+                localSup ? localSup.name : remote.name,
+                localSup ? localSup.mapping : remote.mapping,
+                localSnap.current,
+                { previousSnapshot: localSnap.previous || [], syncMode: 'sync' }
+              );
+            } catch (pushErr) {
+              console.warn('Auto-push pending local snapshot to cloud failed:', pushErr);
+            }
+            continue;
+          }
+        }
+
+        // Если в облаке пустая/новая строка без метки времени, а локально есть база — аккуратно загружаем её с сохранением previous
+        if (!force && localHasData && !remoteHasData && remoteTime === 0) {
           try {
             await this.syncSnapshotToCloud(
               remote.id,
               localSup ? localSup.name : remote.name,
               localSup ? localSup.mapping : remote.mapping,
-              localSnap.current
+              localSnap.current,
+              { previousSnapshot: localSnap.previous || [], syncMode: 'sync' }
             );
           } catch (pushErr) {
-            console.warn('Auto-push local snapshot to cloud failed:', pushErr);
+            console.warn('Initial push local snapshot to cloud failed:', pushErr);
           }
           continue;
         }
 
         // 2. Обновляем локальную базу, если:
-        // 1. Принудительная синхронизация (force: true)
-        // 2. В облаке есть данные, а локально база пустая (устраняет рассинхрон при открытии на новом устройстве)
-        // 3. В облаке снимок новее, чем локально (включая очистку в облаке с более новым timestamp)
-        // 4. Поставщик еще не создан локально
+        // - Принудительная синхронизация (force: true)
+        // - Поставщик еще не создан локально
+        // - В облаке снимок строго новее локального (remoteTime > localTime)
+        // - Локальная база девственно пустая (localTime === 0 && !localCleared), а в облаке есть данные
         const shouldUpdate = force ||
-          (!localHasData && remoteHasData) ||
+          !localSup ||
           (remoteTime > localTime) ||
-          !localSup;
+          (!localHasData && !localCleared && localTime === 0 && remoteHasData);
 
         if (shouldUpdate) {
           hasUpdates = true;
@@ -480,19 +583,41 @@ class StorageManager {
             updatedAt: remote.updatedAt
           });
 
-          // Сохраняем снимок с декомпактизацией
-          const currentDecompacted = this._decompactSnapshot(remote.currentSnapshot || []);
-          const previousDecompacted = this._decompactSnapshot(remote.previousSnapshot || []);
-
           await this.saveSnapshotRecord({
             supplierId: remote.id,
             current: currentDecompacted,
-            previous: previousDecompacted,
-            updatedAt: remote.updatedAt
+            previous: remote.corruptedPrevious ? (localSnap.previous || []) : previousDecompacted,
+            updatedAt: remote.updatedAt,
+            syncPending: false,
+            clearedLocally: false
           });
         }
       }
 
+      // 3. Проверяем локальных поставщиков, которых еще нет в Google Таблице
+      if (!force) {
+        const localSuppliers = await this.getAllSuppliers();
+        for (const localSup of localSuppliers) {
+          if (remoteIds.has(localSup.id)) continue;
+          const localSnap = await this.getSnapshotRecord(localSup.id);
+          const localHasData = Boolean(localSnap && localSnap.current && localSnap.current.length > 0);
+          if (localHasData && localSnap.syncPending) {
+            try {
+              await this.syncSnapshotToCloud(
+                localSup.id,
+                localSup.name,
+                localSup.mapping,
+                localSnap.current,
+                { previousSnapshot: localSnap.previous || [], syncMode: 'sync' }
+              );
+            } catch (pushErr) {
+              console.warn('Auto-push local-only supplier failed:', pushErr);
+            }
+          }
+        }
+      }
+
+      this.lastSyncAt = Date.now();
       this._notifyStatus('synced', 'Синхронизировано');
       return { hasUpdates, suppliers: remoteSuppliers };
 
@@ -500,41 +625,61 @@ class StorageManager {
       console.warn('Sync failed:', err);
       this._notifyStatus('error', err.message);
       return { hasUpdates: false, error: err.message };
+    } finally {
+      this.isSyncing = false;
     }
   }
 
   /**
    * Отправка нового снимка в Google Apps Script (POST)
+   * @param {object} options - { previousSnapshot?: Array, syncMode?: 'commit' | 'sync' }
    */
-  async syncSnapshotToCloud(supplierId, supplierName, mapping, snapshot) {
+  async syncSnapshotToCloud(supplierId, supplierName, mapping, snapshot, options = {}) {
     const { url, token } = this.getCloudConfig();
     if (!url || !token) return null; // Офлайн режим
 
     try {
       this._notifyStatus('syncing', 'Отправка в Google Таблицу...');
 
-      // Компактная сериализация для гарантированного прохождения лимита ячеек Google Sheets (50 000 символов)
+      // Компактная сериализация v2 со словарем категорий/брендов
       const sanitized = this._sanitizeSnapshotItems(snapshot);
       const compactSnapshot = this._compactSnapshot(sanitized);
+
+      const payload = {
+        action: 'save_snapshot',
+        token: token.trim(),
+        supplierId,
+        supplierName,
+        mapping,
+        snapshot: compactSnapshot,
+        syncMode: options.syncMode === 'sync' ? 'sync' : 'commit'
+      };
+
+      if (options.previousSnapshot !== undefined) {
+        const sanitizedPrev = this._sanitizeSnapshotItems(options.previousSnapshot);
+        payload.previousSnapshot = this._compactSnapshot(sanitizedPrev);
+      }
 
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain;charset=utf-8' // Предотвращает CORS preflight в браузере!
         },
-        body: JSON.stringify({
-          action: 'save_snapshot',
-          token: token.trim(),
-          supplierId,
-          supplierName,
-          mapping,
-          snapshot: compactSnapshot
-        })
+        body: JSON.stringify(payload)
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ошибка облака: ${response.status}`);
+      }
 
       const res = await response.json();
       if (!res.success) {
         throw new Error(res.error || 'Ошибка сохранения в Google Apps Script');
+      }
+
+      // Синхронизируем локальную метку времени с серверной, чтобы избежать ложных авто-пушей
+      if (res.updatedAt) {
+        await this.markSnapshotSynced(supplierId, res.updatedAt);
       }
 
       this._notifyStatus('synced', 'Сохранено в облаке');
@@ -548,7 +693,7 @@ class StorageManager {
   }
 
   /**
-   * Принудительная отправка локальной базы поставщика в Google Sheets
+   * Принудительная отправка локальной базы поставщика в Google Sheets (с сохранением previous)
    */
   async pushLocalSnapshotToCloud(supplierId) {
     const { url, token } = this.getCloudConfig();
@@ -560,8 +705,12 @@ class StorageManager {
     const supName = supplier ? supplier.name : 'Поставщик';
     const mapping = supplier ? supplier.mapping : null;
     const items = (snap && snap.current) ? snap.current : [];
+    const prevItems = (snap && snap.previous) ? snap.previous : [];
 
-    return await this.syncSnapshotToCloud(supplierId, supName, mapping, items);
+    return await this.syncSnapshotToCloud(supplierId, supName, mapping, items, {
+      previousSnapshot: prevItems,
+      syncMode: 'sync'
+    });
   }
 
   /**
@@ -586,9 +735,17 @@ class StorageManager {
         })
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP ошибка облака: ${response.status}`);
+      }
+
       const res = await response.json();
       if (!res.success) {
         throw new Error(res.error || 'Ошибка отката в Google Apps Script');
+      }
+
+      if (res.updatedAt) {
+        await this.markSnapshotSynced(supplierId, res.updatedAt);
       }
 
       this._notifyStatus('synced', 'База откачена');
@@ -623,8 +780,15 @@ class StorageManager {
         })
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP ошибка облака: ${response.status}`);
+      }
+
       const res = await response.json();
       if (res.success) {
+        if (res.updatedAt) {
+          await this.markSnapshotSynced(supplierId, res.updatedAt);
+        }
         this._notifyStatus('synced', 'База в облаке очищена');
         return res;
       }
@@ -656,6 +820,9 @@ class StorageManager {
           })
         });
         const fbJson = await fbRes.json();
+        if (fbJson && fbJson.updatedAt) {
+          await this.markSnapshotSynced(supplierId, fbJson.updatedAt);
+        }
         this._notifyStatus('synced', 'База в облаке очищена');
         return fbJson;
       }
@@ -723,38 +890,106 @@ class StorageManager {
   }
 
   _compactSnapshot(items) {
-    if (!Array.isArray(items)) return [];
-    return items.map(i => {
-      // 1. Простейший кортеж: [name, stock]
-      if (!i.code && !i.isTextStock && !i.packageType && !i.category && !i.subCategory) {
-        return [i.name, i.stock];
+    if (!Array.isArray(items) || items.length === 0) return [];
+
+    // Формат v2 со словарем категорий и подкатегорий:
+    // Сокращает объем JSON для крупных поставщиков (например, ПП) на ~25-30%
+    // и сохраняет совместимость с проверками Array.isArray() && length > 0.
+    const cats = [];
+    const catIndexMap = new Map();
+    const subs = [];
+    const subIndexMap = new Map();
+
+    const pkgToCode = { draft: 1, bottle: 2, other: 3 };
+
+    const rows = items.map(i => {
+      let ci = -1;
+      if (i.category) {
+        if (!catIndexMap.has(i.category)) {
+          catIndexMap.set(i.category, cats.length);
+          cats.push(i.category);
+        }
+        ci = catIndexMap.get(i.category);
       }
-      // 2. Кортеж: [name, stock, code, isTextStock ? 1 : 0, textStockNote, packageType, category, subCategory]
-      const arr = [i.name, i.stock, i.code || ''];
-      if (i.isTextStock || i.packageType || i.category || i.subCategory) {
-        arr.push(i.isTextStock ? 1 : 0);
-        arr.push(i.textStockNote || '');
-        arr.push(i.packageType || '');
-        if (i.category || i.subCategory) {
-          arr.push(i.category || '');
-          arr.push(i.subCategory || '');
+
+      let si = -1;
+      if (i.subCategory) {
+        if (!subIndexMap.has(i.subCategory)) {
+          subIndexMap.set(i.subCategory, subs.length);
+          subs.push(i.subCategory);
+        }
+        si = subIndexMap.get(i.subCategory);
+      }
+
+      const pkgCode = pkgToCode[i.packageType] || 0;
+      const code = i.code || '';
+      const isText = i.isTextStock ? 1 : 0;
+      const note = i.textStockNote || '';
+
+      // Кортеж v2: [name, stock, catIdx?, subIdx?, pkgCode?, code?, isText?, note?]
+      const arr = [i.name, i.stock];
+      if (ci >= 0 || si >= 0 || pkgCode || code || isText || note) {
+        arr.push(ci, si, pkgCode);
+        if (code || isText || note) {
+          arr.push(code);
+          if (isText || note) {
+            arr.push(isText);
+            if (note) {
+              arr.push(note);
+            }
+          }
         }
       }
       return arr;
     });
+
+    rows.unshift({ _v: 2, c: cats, s: subs });
+    return rows;
   }
 
   _decompactSnapshot(items) {
-    if (!Array.isArray(items)) return [];
+    if (!Array.isArray(items) || items.length === 0) return [];
+
+    // Формат v2 со словарем категорий в 0-м элементе
+    if (items[0] && !Array.isArray(items[0]) && items[0]._v === 2) {
+      const header = items[0];
+      const cats = Array.isArray(header.c) ? header.c : [];
+      const subs = Array.isArray(header.s) ? header.s : [];
+      const codeToPkg = { 1: 'draft', 2: 'bottle', 3: 'other' };
+
+      const result = [];
+      for (let idx = 1; idx < items.length; idx++) {
+        const i = items[idx];
+        if (!Array.isArray(i)) continue;
+        const ci = typeof i[2] === 'number' ? i[2] : -1;
+        const si = typeof i[3] === 'number' ? i[3] : -1;
+        result.push({
+          name: i[0] || '',
+          stock: typeof i[1] === 'number' ? i[1] : (parseFloat(i[1]) || 0),
+          category: (ci >= 0 && ci < cats.length) ? cats[ci] : '',
+          subCategory: (si >= 0 && si < subs.length) ? subs[si] : '',
+          packageType: codeToPkg[i[4]] || '',
+          code: typeof i[5] === 'string' ? i[5] : '',
+          isTextStock: i[6] === 1,
+          textStockNote: typeof i[7] === 'string' ? i[7] : ''
+        });
+      }
+      return result;
+    }
+
+    // Формат v1 (кортежи) и v0 (объекты)
     return items.map(i => {
       if (Array.isArray(i)) {
+        const isV1WithPkg = typeof i[5] === 'string' && ['draft', 'bottle', 'other', ''].includes(i[5]);
         return {
           name: i[0] || '',
           stock: typeof i[1] === 'number' ? i[1] : (parseFloat(i[1]) || 0),
           code: i[2] || '',
-          isTextStock: i[3] === 1 || i[4] === 1,
-          textStockNote: (typeof i[4] === 'string' ? i[4] : (typeof i[5] === 'string' ? i[5] : '')),
-          packageType: i[5] && typeof i[5] === 'string' && ['draft', 'bottle', 'other'].includes(i[5]) ? i[5] : '',
+          isTextStock: isV1WithPkg ? (i[3] === 1) : (i[4] === 1),
+          textStockNote: isV1WithPkg
+            ? (typeof i[4] === 'string' ? i[4] : '')
+            : (typeof i[5] === 'string' ? i[5] : ''),
+          packageType: (i[5] && typeof i[5] === 'string' && ['draft', 'bottle', 'other'].includes(i[5])) ? i[5] : '',
           category: typeof i[6] === 'string' ? i[6] : '',
           subCategory: typeof i[7] === 'string' ? i[7] : ''
         };

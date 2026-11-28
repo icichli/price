@@ -93,39 +93,153 @@ function createJsonResponse(data) {
 }
 
 /**
- * Безопасная запись длинных строк JSON в ячейки с обходом лимита 50 000 символов
+ * Безопасное форматирование даты/метки времени из ячейки Google Sheets в ISO-строку
+ */
+function formatTimestamp(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return isNaN(val.getTime()) ? '' : val.toISOString();
+  }
+  return String(val).trim();
+}
+
+/**
+ * Безопасная запись длинных строк JSON в ячейки с обходом лимита 50 000 символов.
+ * Поддерживает произвольное количество чанков (не только 2):
+ * - Основная колонка col (5 для Current, 6 для Previous)
+ * - Колонки переполнения: col + 2, col + 4, col + 6, ...
+ *   (Current -> 7, 9, 11...; Previous -> 8, 10, 12...)
+ * Полностью обратно совместимо со старым форматом CHUNK:: (2 чанка).
  */
 function setCellSafe(sheet, row, col, str) {
+  const MAX_SINGLE = 48000;
+  const CHUNK_SIZE = 45000;
+  const lastCol = Math.max(sheet.getLastColumn(), col + 2);
+
   if (!str) {
-    sheet.getRange(row, col).setValue('');
+    sheet.getRange(row, col).setNumberFormat('@').setValue('');
+    clearOverflowCols(sheet, row, col, 1, lastCol);
     return;
   }
-  if (str.length <= 49000) {
-    sheet.getRange(row, col).setValue(str);
-    const overflowCol = col + 2;
-    if (overflowCol <= sheet.getMaxColumns()) {
-      sheet.getRange(row, overflowCol).setValue('');
+
+  if (str.length <= MAX_SINGLE) {
+    sheet.getRange(row, col).setNumberFormat('@').setValue(str);
+    clearOverflowCols(sheet, row, col, 1, lastCol);
+    return;
+  }
+
+  // Разбиваем строку на произвольное число чанков по CHUNK_SIZE символов
+  const chunks = [];
+  for (let offset = 0; offset < str.length; offset += CHUNK_SIZE) {
+    chunks.push(str.substring(offset, offset + CHUNK_SIZE));
+  }
+
+  const maxNeededCol = col + (chunks.length - 1) * 2;
+  if (maxNeededCol > sheet.getMaxColumns()) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), maxNeededCol - sheet.getMaxColumns() + 2);
+  }
+
+  // Сначала записываем колонки переполнения (1..N-1), затем основную ячейку с заголовком CHUNKS::N::
+  for (let k = 1; k < chunks.length; k++) {
+    const overflowCol = col + k * 2;
+    sheet.getRange(row, overflowCol).setNumberFormat('@').setValue(chunks[k]);
+  }
+  sheet.getRange(row, col).setNumberFormat('@').setValue('CHUNKS::' + chunks.length + '::' + chunks[0]);
+
+  // Очищаем возможные лишние старые колонки переполнения
+  clearOverflowCols(sheet, row, col, chunks.length, lastCol);
+}
+
+/**
+ * Очистка неиспользуемых колонок переполнения для заданной основной колонки
+ */
+function clearOverflowCols(sheet, row, col, startStep, lastCol) {
+  const maxCols = sheet.getMaxColumns();
+  const limitCol = Math.min(lastCol, maxCols);
+  for (let c = col + startStep * 2; c <= limitCol; c += 2) {
+    const cell = sheet.getRange(row, c);
+    if (cell.getValue() !== '') {
+      cell.setValue('');
     }
-  } else {
-    const chunk1 = str.substring(0, 48000);
-    const chunk2 = str.substring(48000);
-    sheet.getRange(row, col).setValue('CHUNK::' + chunk1);
-    const overflowCol = col + 2;
-    if (overflowCol > sheet.getMaxColumns()) {
-      sheet.insertColumnsAfter(sheet.getMaxColumns(), overflowCol - sheet.getMaxColumns() + 2);
-    }
-    sheet.getRange(row, overflowCol).setValue(chunk2);
   }
 }
 
-function getCellSafe(row, colZeroBased) {
-  const val = row[colZeroBased] ? String(row[colZeroBased]) : '';
+/**
+ * Безопасное чтение длинной строки JSON из ячейки и ее колонок переполнения.
+ * Возвращает { text, corrupted }.
+ */
+function getCellSafeInfo(row, colZeroBased) {
+  const val = row[colZeroBased] !== undefined && row[colZeroBased] !== null ? String(row[colZeroBased]) : '';
+
+  if (val.startsWith('CHUNKS::')) {
+    const secondSep = val.indexOf('::', 8);
+    if (secondSep === -1) {
+      return { text: '', corrupted: true };
+    }
+    const totalChunks = parseInt(val.substring(8, secondSep), 10);
+    if (isNaN(totalChunks) || totalChunks < 1) {
+      return { text: '', corrupted: true };
+    }
+    let result = val.substring(secondSep + 2);
+    for (let k = 1; k < totalChunks; k++) {
+      const idx = colZeroBased + k * 2;
+      const part = (idx < row.length && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]) : '';
+      if (!part) {
+        return { text: result, corrupted: true };
+      }
+      result += part;
+    }
+    return { text: result, corrupted: false };
+  }
+
   if (val.startsWith('CHUNK::')) {
     const part1 = val.substring(7);
-    const part2 = row[colZeroBased + 2] ? String(row[colZeroBased + 2]) : '';
-    return part1 + part2;
+    const idx = colZeroBased + 2;
+    const part2 = (idx < row.length && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]) : '';
+    return { text: part1 + part2, corrupted: false };
   }
-  return val;
+
+  return { text: val, corrupted: false };
+}
+
+function getCellSafe(row, colZeroBased) {
+  return getCellSafeInfo(row, colZeroBased).text;
+}
+
+/**
+ * Безопасный разбор JSON снимка с возвратом флага повреждения
+ */
+function parseSnapshotJsonSafe(info) {
+  if (!info || !info.text) {
+    return { data: [], corrupted: Boolean(info && info.corrupted) };
+  }
+  try {
+    const parsed = JSON.parse(info.text);
+    return { data: parsed || [], corrupted: Boolean(info.corrupted) };
+  } catch (err) {
+    return { data: [], corrupted: true };
+  }
+}
+
+/**
+ * Проверка, содержит ли JSON-строка непустой снимок (массив или объект v2 с непустым d)
+ */
+function isNonEmptySnapshotJson(jsonStr) {
+  if (!jsonStr || jsonStr === '[]' || jsonStr === '{}') return false;
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) return false;
+      if (parsed[0] && !Array.isArray(parsed[0]) && parsed[0]._v === 2) {
+        return parsed.length > 1;
+      }
+      return true;
+    }
+    if (parsed && typeof parsed === 'object' && Array.isArray(parsed.d)) return parsed.d.length > 0;
+    return false;
+  } catch (err) {
+    return false;
+  }
 }
 
 /**
@@ -161,23 +275,22 @@ function doGet(e) {
       if (!supplierId) continue;
       
       let mapping = null;
-      let currentSnapshot = [];
-      let previousSnapshot = [];
+      const currentInfo = getCellSafeInfo(row, 4);
+      const previousInfo = getCellSafeInfo(row, 5);
+      const parsedCurrent = parseSnapshotJsonSafe(currentInfo);
+      const parsedPrevious = parseSnapshotJsonSafe(previousInfo);
       
-      const currentJson = getCellSafe(row, 4);
-      const previousJson = getCellSafe(row, 5);
-      
-      try { mapping = row[3] ? JSON.parse(row[3]) : null; } catch(err) {}
-      try { currentSnapshot = currentJson ? JSON.parse(currentJson) : []; } catch(err) {}
-      try { previousSnapshot = previousJson ? JSON.parse(previousJson) : []; } catch(err) {}
+      try { mapping = row[3] ? JSON.parse(String(row[3])) : null; } catch(err) {}
       
       suppliers.push({
         id: String(supplierId),
         name: String(row[1] || ''),
-        updatedAt: row[2] ? String(row[2]) : '',
+        updatedAt: formatTimestamp(row[2]),
         mapping: mapping,
-        currentSnapshot: currentSnapshot,
-        previousSnapshot: previousSnapshot
+        currentSnapshot: parsedCurrent.data,
+        previousSnapshot: parsedPrevious.data,
+        corruptedCurrent: parsedCurrent.corrupted,
+        corruptedPrevious: parsedPrevious.corrupted
       });
     }
     
@@ -217,198 +330,249 @@ function doPost(e) {
     }
     
     const action = payload.action;
-    const sheet = getOrCreateSheet();
-    const data = sheet.getDataRange().getValues();
     
-    // 1. Проверка соединения
+    // 1. Проверка соединения (не требует блокировки таблицы)
     if (action === 'test_connection') {
       return createJsonResponse({
         success: true,
         message: 'Соединение с Google Apps Script успешно установлено!'
       });
     }
-    
-    // 2. Сохранение нового снимка (save_snapshot)
-    if (action === 'save_snapshot') {
-      const supplierId = String(payload.supplierId || '');
-      const supplierName = String(payload.supplierName || 'Поставщик');
-      const newSnapshot = payload.snapshot || [];
-      const mapping = payload.mapping || null;
-      const nowIso = new Date().toISOString();
-      
-      if (!supplierId) {
-        return createJsonResponse({ success: false, error: 'supplierId обязателен' });
-      }
-      
-      let targetRowIndex = -1;
-      let existingCurrentJson = '[]';
-      
-      for (let i = 1; i < data.length; i++) {
-        if (String(data[i][0]) === supplierId) {
-          targetRowIndex = i + 1; // в Sheets строки с 1
-          existingCurrentJson = getCellSafe(data[i], 4) || '[]';
-          break;
-        }
-      }
-      
-      const newSnapshotJson = JSON.stringify(newSnapshot);
-      const mappingJson = mapping ? JSON.stringify(mapping) : '';
-      
-      if (targetRowIndex > 0) {
-        // Переносим текущее в предыдущее (откат на 1 шаг), пишем новое в текущее
-        sheet.getRange(targetRowIndex, 2).setValue(supplierName);
-        sheet.getRange(targetRowIndex, 3).setValue(nowIso);
-        if (mappingJson) {
-          sheet.getRange(targetRowIndex, 4).setValue(mappingJson);
-        }
-        setCellSafe(sheet, targetRowIndex, 5, newSnapshotJson);
-        setCellSafe(sheet, targetRowIndex, 6, existingCurrentJson);
-      } else {
-        // Новый поставщик
-        sheet.appendRow([
-          supplierId,
-          supplierName,
-          nowIso,
-          mappingJson,
-          '',
-          '[]'
-        ]);
-        const newRowIndex = sheet.getLastRow();
-        setCellSafe(sheet, newRowIndex, 5, newSnapshotJson);
-      }
-      
+
+    // Блокировка на время записи в таблицу для защиты от параллельных запросов (гонок)
+    const lock = LockService.getScriptLock();
+    const gotLock = lock.tryLock(15000);
+    if (!gotLock) {
       return createJsonResponse({
-        success: true,
-        updatedAt: nowIso,
-        message: 'Снимок успешно сохранен в Google Sheets'
+        success: false,
+        error: 'Таблица временно занята другой операцией синхронизации. Повторите через пару секунд.'
       });
     }
-    
-    // 3. Откат к предыдущему снимку (rollback)
-    if (action === 'rollback') {
-      const supplierId = String(payload.supplierId || '');
-      if (!supplierId) {
-        return createJsonResponse({ success: false, error: 'supplierId обязателен' });
-      }
+
+    try {
+      const sheet = getOrCreateSheet();
+      const data = sheet.getDataRange().getValues();
       
-      let targetRowIndex = -1;
-      let previousSnapshotJson = '';
-      
-      for (let i = 1; i < data.length; i++) {
-        if (String(data[i][0]) === supplierId) {
-          targetRowIndex = i + 1;
-          previousSnapshotJson = getCellSafe(data[i], 5) || '';
-          break;
-        }
-      }
-      
-      if (targetRowIndex === -1) {
-        return createJsonResponse({ success: false, error: 'Поставщик не найден' });
-      }
-      
-      if (!previousSnapshotJson || previousSnapshotJson === '[]') {
-        return createJsonResponse({ success: false, error: 'Предыдущий снимок отсутствует. Откат невозможен.' });
-      }
-      
-      const nowIso = new Date().toISOString();
-      // Восстанавливаем PreviousSnapshot в CurrentSnapshot
-      sheet.getRange(targetRowIndex, 3).setValue(nowIso);
-      setCellSafe(sheet, targetRowIndex, 5, previousSnapshotJson);
-      setCellSafe(sheet, targetRowIndex, 6, ''); // очищаем previous после отката
-      
-      let restoredData = [];
-      try { restoredData = JSON.parse(previousSnapshotJson); } catch (e) {}
-      
-      return createJsonResponse({
-        success: true,
-        updatedAt: nowIso,
-        currentSnapshot: restoredData,
-        message: 'База успешно откачена к предыдущему снимку'
-      });
-    }
-    
-    // 3.1. Очистка базы снимка поставщика (clear_snapshot)
-    if (action === 'clear_snapshot') {
-      const supplierId = String(payload.supplierId || '');
-      if (!supplierId) {
-        return createJsonResponse({ success: false, error: 'supplierId обязателен' });
-      }
-      
-      let targetRowIndex = -1;
-      for (let i = 1; i < data.length; i++) {
-        if (String(data[i][0]) === supplierId) {
-          targetRowIndex = i + 1;
-          break;
-        }
-      }
-      
-      const nowIso = new Date().toISOString();
-      if (targetRowIndex > 0) {
-        sheet.getRange(targetRowIndex, 3).setValue(nowIso);
-        setCellSafe(sheet, targetRowIndex, 5, '[]');
-        setCellSafe(sheet, targetRowIndex, 6, '[]');
+      // 2. Сохранение нового снимка (save_snapshot)
+      if (action === 'save_snapshot') {
+        const supplierId = String(payload.supplierId || '');
+        const supplierName = String(payload.supplierName || 'Поставщик');
+        const newSnapshot = payload.snapshot !== undefined ? payload.snapshot : [];
+        const hasExplicitPrevious = payload.previousSnapshot !== undefined && payload.previousSnapshot !== null;
+        const explicitPreviousJson = hasExplicitPrevious ? JSON.stringify(payload.previousSnapshot) : null;
+        const syncMode = payload.syncMode === 'sync' ? 'sync' : 'commit';
+        const mapping = payload.mapping || null;
+        const nowIso = new Date().toISOString();
         
-        // Очищаем lastFileName в MappingJSON, если он был сохранен
-        let mapping = null;
-        try { mapping = data[targetRowIndex - 1][3] ? JSON.parse(data[targetRowIndex - 1][3]) : null; } catch (e) {}
-        if (mapping) {
-          delete mapping.lastFileName;
-          delete mapping.lastCommitTime;
-          sheet.getRange(targetRowIndex, 4).setValue(JSON.stringify(mapping));
+        if (!supplierId) {
+          return createJsonResponse({ success: false, error: 'supplierId обязателен' });
         }
-      }
-      
-      return createJsonResponse({
-        success: true,
-        updatedAt: nowIso,
-        message: 'База остатков поставщика успешно очищена в Google Sheets'
-      });
-    }
-    
-    // 4. Управление поставщиками (создание, переименование, удаление)
-    if (action === 'manage_supplier') {
-      const subAction = payload.subAction; // 'create', 'rename', 'delete'
-      const supplierId = String(payload.supplierId || '');
-      const supplierName = String(payload.supplierName || '');
-      
-      if (!supplierId) {
-        return createJsonResponse({ success: false, error: 'supplierId обязателен' });
-      }
-      
-      let targetRowIndex = -1;
-      for (let i = 1; i < data.length; i++) {
-        if (String(data[i][0]) === supplierId) {
-          targetRowIndex = i + 1;
-          break;
+        
+        let targetRowIndex = -1;
+        let existingCurrentInfo = { text: '[]', corrupted: false };
+        let existingPreviousInfo = { text: '[]', corrupted: false };
+        
+        for (let i = 1; i < data.length; i++) {
+          if (String(data[i][0]) === supplierId) {
+            targetRowIndex = i + 1; // в Sheets строки с 1
+            existingCurrentInfo = getCellSafeInfo(data[i], 4);
+            existingPreviousInfo = getCellSafeInfo(data[i], 5);
+            break;
+          }
         }
-      }
-      
-      if (subAction === 'delete') {
+        
+        const newSnapshotJson = JSON.stringify(newSnapshot);
+        const mappingJson = mapping ? JSON.stringify(mapping) : '';
+        
+        // Вычисляем итоговый PreviousSnapshotJSON безопасно (без затирания истории при повторном пуше того же снимка)
+        let nextPreviousJson = existingPreviousInfo.corrupted ? '[]' : (existingPreviousInfo.text || '[]');
+        
+        if (syncMode === 'sync') {
+          // Режим синхронизации/восстановления: сохраняем переданный локальный previous (если передан),
+          // и никогда не сдвигаем current в previous!
+          if (explicitPreviousJson !== null) {
+            nextPreviousJson = explicitPreviousJson;
+          }
+        } else {
+          // Режим commit: переносим старый current в previous ТОЛЬКО если он валидный, непустой и отличается от нового
+          const existingCurrentValid = !existingCurrentInfo.corrupted && isNonEmptySnapshotJson(existingCurrentInfo.text);
+          if (existingCurrentValid && existingCurrentInfo.text !== newSnapshotJson) {
+            nextPreviousJson = existingCurrentInfo.text;
+          } else if (!existingCurrentValid && explicitPreviousJson !== null && isNonEmptySnapshotJson(explicitPreviousJson)) {
+            nextPreviousJson = explicitPreviousJson;
+          }
+        }
+        
         if (targetRowIndex > 0) {
-          sheet.deleteRow(targetRowIndex);
-        }
-        return createJsonResponse({ success: true, message: 'Поставщик удален' });
-      }
-      
-      if (subAction === 'rename') {
-        if (targetRowIndex > 0) {
+          // Атомарный порядок записи: сначала все данные и чанки, и ТОЛЬКО В КОНЦЕ — UpdatedAt!
           sheet.getRange(targetRowIndex, 2).setValue(supplierName);
+          if (mappingJson) {
+            sheet.getRange(targetRowIndex, 4).setNumberFormat('@').setValue(mappingJson);
+          }
+          setCellSafe(sheet, targetRowIndex, 6, nextPreviousJson);
+          setCellSafe(sheet, targetRowIndex, 5, newSnapshotJson);
+          sheet.getRange(targetRowIndex, 3).setNumberFormat('@').setValue(nowIso);
+        } else {
+          // Новый поставщик: создаем строку с пустым UpdatedAt, записываем чанки, затем ставим UpdatedAt
+          sheet.appendRow([
+            supplierId,
+            supplierName,
+            '',
+            mappingJson,
+            '',
+            ''
+          ]);
+          const newRowIndex = sheet.getLastRow();
+          setCellSafe(sheet, newRowIndex, 6, explicitPreviousJson !== null ? explicitPreviousJson : '[]');
+          setCellSafe(sheet, newRowIndex, 5, newSnapshotJson);
+          sheet.getRange(newRowIndex, 3).setNumberFormat('@').setValue(nowIso);
         }
-        return createJsonResponse({ success: true, message: 'Поставщик переименован' });
+        
+        SpreadsheetApp.flush();
+        
+        return createJsonResponse({
+          success: true,
+          updatedAt: nowIso,
+          message: 'Снимок успешно сохранен в Google Sheets'
+        });
       }
       
-      if (subAction === 'create') {
+      // 3. Откат к предыдущему снимку (rollback)
+      if (action === 'rollback') {
+        const supplierId = String(payload.supplierId || '');
+        if (!supplierId) {
+          return createJsonResponse({ success: false, error: 'supplierId обязателен' });
+        }
+        
+        let targetRowIndex = -1;
+        let previousSnapshotInfo = { text: '', corrupted: false };
+        
+        for (let i = 1; i < data.length; i++) {
+          if (String(data[i][0]) === supplierId) {
+            targetRowIndex = i + 1;
+            previousSnapshotInfo = getCellSafeInfo(data[i], 5);
+            break;
+          }
+        }
+        
         if (targetRowIndex === -1) {
-          const nowIso = new Date().toISOString();
-          sheet.appendRow([supplierId, supplierName, nowIso, '', '[]', '[]']);
+          return createJsonResponse({ success: false, error: 'Поставщик не найден' });
         }
-        return createJsonResponse({ success: true, message: 'Поставщик создан' });
+        
+        const previousSnapshotJson = previousSnapshotInfo.text;
+        if (previousSnapshotInfo.corrupted || !isNonEmptySnapshotJson(previousSnapshotJson)) {
+          return createJsonResponse({ success: false, error: 'Предыдущий снимок отсутствует или поврежден. Откат невозможен.' });
+        }
+        
+        const nowIso = new Date().toISOString();
+        // Восстанавливаем PreviousSnapshot в CurrentSnapshot, UpdatedAt обновляем в конце
+        setCellSafe(sheet, targetRowIndex, 5, previousSnapshotJson);
+        setCellSafe(sheet, targetRowIndex, 6, '[]');
+        sheet.getRange(targetRowIndex, 3).setNumberFormat('@').setValue(nowIso);
+        SpreadsheetApp.flush();
+        
+        let restoredData = [];
+        try { restoredData = JSON.parse(previousSnapshotJson); } catch (e) {}
+        
+        return createJsonResponse({
+          success: true,
+          updatedAt: nowIso,
+          currentSnapshot: restoredData,
+          message: 'База успешно откачена к предыдущему снимку'
+        });
       }
       
-      return createJsonResponse({ success: false, error: 'Неизвестное действие: ' + subAction });
+      // 3.1. Очистка базы снимка поставщика (clear_snapshot)
+      if (action === 'clear_snapshot') {
+        const supplierId = String(payload.supplierId || '');
+        if (!supplierId) {
+          return createJsonResponse({ success: false, error: 'supplierId обязателен' });
+        }
+        
+        let targetRowIndex = -1;
+        for (let i = 1; i < data.length; i++) {
+          if (String(data[i][0]) === supplierId) {
+            targetRowIndex = i + 1;
+            break;
+          }
+        }
+        
+        const nowIso = new Date().toISOString();
+        if (targetRowIndex > 0) {
+          setCellSafe(sheet, targetRowIndex, 5, '[]');
+          setCellSafe(sheet, targetRowIndex, 6, '[]');
+          
+          // Очищаем lastFileName в MappingJSON, если он был сохранен
+          let mapping = null;
+          try { mapping = data[targetRowIndex - 1][3] ? JSON.parse(String(data[targetRowIndex - 1][3])) : null; } catch (e) {}
+          if (mapping) {
+            delete mapping.lastFileName;
+            delete mapping.lastCommitTime;
+            sheet.getRange(targetRowIndex, 4).setNumberFormat('@').setValue(JSON.stringify(mapping));
+          }
+          sheet.getRange(targetRowIndex, 3).setNumberFormat('@').setValue(nowIso);
+          SpreadsheetApp.flush();
+        }
+        
+        return createJsonResponse({
+          success: true,
+          updatedAt: nowIso,
+          message: 'База остатков поставщика успешно очищена в Google Sheets'
+        });
+      }
+      
+      // 4. Управление поставщиками (создание, переименование, удаление)
+      if (action === 'manage_supplier') {
+        const subAction = payload.subAction; // 'create', 'rename', 'delete'
+        const supplierId = String(payload.supplierId || '');
+        const supplierName = String(payload.supplierName || '');
+        
+        if (!supplierId) {
+          return createJsonResponse({ success: false, error: 'supplierId обязателен' });
+        }
+        
+        let targetRowIndex = -1;
+        for (let i = 1; i < data.length; i++) {
+          if (String(data[i][0]) === supplierId) {
+            targetRowIndex = i + 1;
+            break;
+          }
+        }
+        
+        if (subAction === 'delete') {
+          if (targetRowIndex > 0) {
+            sheet.deleteRow(targetRowIndex);
+            SpreadsheetApp.flush();
+          }
+          return createJsonResponse({ success: true, message: 'Поставщик удален' });
+        }
+        
+        if (subAction === 'rename') {
+          if (targetRowIndex > 0) {
+            sheet.getRange(targetRowIndex, 2).setValue(supplierName);
+            SpreadsheetApp.flush();
+          }
+          return createJsonResponse({ success: true, message: 'Поставщик переименован' });
+        }
+        
+        if (subAction === 'create') {
+          if (targetRowIndex === -1) {
+            const nowIso = new Date().toISOString();
+            sheet.appendRow([supplierId, supplierName, '', '', '[]', '[]']);
+            const newRowIndex = sheet.getLastRow();
+            sheet.getRange(newRowIndex, 3).setNumberFormat('@').setValue(nowIso);
+            SpreadsheetApp.flush();
+          }
+          return createJsonResponse({ success: true, message: 'Поставщик создан' });
+        }
+        
+        return createJsonResponse({ success: false, error: 'Неизвестное действие: ' + subAction });
+      }
+      
+      return createJsonResponse({ success: false, error: 'Неизвестное действие: ' + action });
+    } finally {
+      lock.releaseLock();
     }
-    
-    return createJsonResponse({ success: false, error: 'Неизвестное действие: ' + action });
     
   } catch (err) {
     return createJsonResponse({

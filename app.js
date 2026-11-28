@@ -57,7 +57,10 @@
 
     // Текущий режим редактирования поставщика
     supplierModalMode: 'add', // 'add' | 'edit'
-    supplierModalTargetId: null
+    supplierModalTargetId: null,
+
+    // Метка последнего открытия диалога выбора файла (защита от ложной синхронизации по window.focus)
+    lastFilePickerOpenedAt: 0
   };
 
   // ==========================================================================
@@ -648,13 +651,54 @@
       ? state.currentSheetData[state.currentHeaderRowIndex - 1]
       : null;
 
-    // 2. Проверяем сохраненный маппинг поставщика
-    const activeSup = state.suppliers.find(s => s.id === state.activeSupplierId);
-    let mapping = activeSup ? activeSup.mapping : null;
+    // Максимальная ширина таблицы по первым строкам
+    let maxCols = Math.max(headerRow.length, previousRow ? previousRow.length : 0);
+    const sampleLimit = Math.min(state.currentSheetData.length, state.currentHeaderRowIndex + 30);
+    for (let r = state.currentHeaderRowIndex; r < sampleLimit; r++) {
+      if (Array.isArray(state.currentSheetData[r]) && state.currentSheetData[r].length > maxCols) {
+        maxCols = state.currentSheetData[r].length;
+      }
+    }
 
-    // Если нет сохраненного маппинга или он не валиден — выполняем автомаппинг
-    if (!mapping || mapping.nameCol < 0 || mapping.stockCol < 0) {
-      mapping = window.ExcelParser.detectColumns(headerRow, previousRow);
+    // 2. Всегда выполняем автоопределение колонок для текущего файла
+    const detected = window.ExcelParser.detectColumns(headerRow, previousRow);
+    const activeSup = state.suppliers.find(s => s.id === state.activeSupplierId);
+    const savedMapping = activeSup ? activeSup.mapping : null;
+
+    let mapping = null;
+
+    // Используем сохраненный ручной маппинг, только если он явно был настроен вручную
+    // И его колонки попадают в границы текущего листа
+    const isSavedValid = Boolean(
+      savedMapping &&
+      savedMapping.isManual &&
+      typeof savedMapping.nameCol === 'number' && savedMapping.nameCol >= 0 && savedMapping.nameCol < maxCols &&
+      typeof savedMapping.stockCol === 'number' && savedMapping.stockCol >= 0 && savedMapping.stockCol < maxCols
+    );
+
+    if (isSavedValid) {
+      mapping = {
+        ...savedMapping,
+        unitCol: (typeof savedMapping.unitCol === 'number' && savedMapping.unitCol >= 0 && savedMapping.unitCol < maxCols)
+          ? savedMapping.unitCol
+          : detected.unitCol
+      };
+    } else if (detected.nameCol >= 0 && detected.stockCol >= 0) {
+      mapping = { ...detected, isManual: false };
+    } else if (
+      savedMapping &&
+      typeof savedMapping.nameCol === 'number' && savedMapping.nameCol >= 0 && savedMapping.nameCol < maxCols &&
+      typeof savedMapping.stockCol === 'number' && savedMapping.stockCol >= 0 && savedMapping.stockCol < maxCols
+    ) {
+      // Резервный вариант: если автодетектор не нашел колонки, пробуем сохраненный маппинг
+      mapping = {
+        ...savedMapping,
+        unitCol: (typeof savedMapping.unitCol === 'number' && savedMapping.unitCol >= 0 && savedMapping.unitCol < maxCols)
+          ? savedMapping.unitCol
+          : detected.unitCol
+      };
+    } else {
+      mapping = detected;
     }
 
     state.currentMapping = mapping;
@@ -666,17 +710,44 @@
       return;
     }
 
-    // Извлекаем позиции
-    extractAndDiff();
+    // Извлекаем позиции (с автоподстраховкой, если ручной/облачный маппинг дал 0 позиций)
+    extractAndDiff(detected);
   }
 
-  function extractAndDiff() {
+  function extractAndDiff(fallbackDetectedMapping = null) {
     try {
-      const extracted = window.ExcelParser.extractItems(
+      let extracted = window.ExcelParser.extractItems(
         state.currentSheetData,
         state.currentHeaderRowIndex,
         state.currentMapping
       );
+
+      // Если маппинг вернул 0 позиций, а автодетектор нашел другие валидные колонки — пробуем его
+      if (
+        extracted.items.length === 0 &&
+        fallbackDetectedMapping &&
+        fallbackDetectedMapping.nameCol >= 0 &&
+        fallbackDetectedMapping.stockCol >= 0 &&
+        (fallbackDetectedMapping.nameCol !== state.currentMapping.nameCol ||
+          fallbackDetectedMapping.stockCol !== state.currentMapping.stockCol)
+      ) {
+        const fallbackExtracted = window.ExcelParser.extractItems(
+          state.currentSheetData,
+          state.currentHeaderRowIndex,
+          fallbackDetectedMapping
+        );
+        if (fallbackExtracted.items.length > 0) {
+          state.currentMapping = { ...fallbackDetectedMapping, isManual: false };
+          extracted = fallbackExtracted;
+        }
+      }
+
+      if (extracted.items.length === 0) {
+        state.parsedItems = [];
+        showToast('В файле не найдено товарных позиций. Проверьте выбранный лист и колонки.', 'error');
+        openMappingModal();
+        return;
+      }
 
       state.parsedItems = extracted.items;
 
@@ -1323,19 +1394,35 @@
       );
 
       state.baselineSnapshot = updatedRecord;
+      if (sup) {
+        sup.mapping = mapping;
+        sup.updatedAt = updatedRecord.updatedAt;
+      }
       updateBaselineInfo();
       updateRollbackButtonState();
 
-      // 2. Облачная отправка (POST)
+      // 2. Облачная отправка (POST) с передачей локального previous на случай восстановления облака
       let cloudSuccess = false;
       try {
         const cloudRes = await window.PriceStorage.syncSnapshotToCloud(
           state.activeSupplierId,
           supName,
           mapping,
-          state.baselineSnapshot.current
+          state.baselineSnapshot.current,
+          {
+            previousSnapshot: state.baselineSnapshot.previous || [],
+            syncMode: 'commit'
+          }
         );
-        if (cloudRes) cloudSuccess = true;
+        if (cloudRes) {
+          cloudSuccess = true;
+          if (cloudRes.updatedAt) {
+            state.baselineSnapshot.updatedAt = cloudRes.updatedAt;
+            state.baselineSnapshot.syncPending = false;
+            if (sup) sup.updatedAt = cloudRes.updatedAt;
+            updateBaselineInfo();
+          }
+        }
       } catch (cloudErr) {
         console.warn('Cloud sync error on commit:', cloudErr);
         showToast('База зафиксирована локально (ошибка облака: ' + cloudErr.message + ')', 'warning');
@@ -1384,7 +1471,12 @@
       updateRollbackButtonState();
 
       // 2. Облачный откат
-      await window.PriceStorage.rollbackInCloud(state.activeSupplierId);
+      const cloudRes = await window.PriceStorage.rollbackInCloud(state.activeSupplierId);
+      if (cloudRes && cloudRes.updatedAt) {
+        state.baselineSnapshot.updatedAt = cloudRes.updatedAt;
+        state.baselineSnapshot.syncPending = false;
+        updateBaselineInfo();
+      }
 
       showToast('База успешно возвращена к предыдущему состоянию!', 'success');
 
@@ -1441,7 +1533,11 @@
       }
 
       // 3. Очистка в облаке Google Sheets
-      await window.PriceStorage.clearSnapshotInCloud(state.activeSupplierId, supName);
+      const cloudClearRes = await window.PriceStorage.clearSnapshotInCloud(state.activeSupplierId, supName);
+      if (cloudClearRes && cloudClearRes.updatedAt) {
+        state.baselineSnapshot.updatedAt = cloudClearRes.updatedAt;
+        state.baselineSnapshot.syncPending = false;
+      }
 
       // 4. Сброс UI
       dom.fileCard.classList.remove('visible');
@@ -1661,10 +1757,15 @@
 
   async function applyCustomMapping() {
     const selects = dom.previewTableHead.querySelectorAll('.preview-col-select');
+    const existingUnitCol = (state.currentMapping && typeof state.currentMapping.unitCol === 'number')
+      ? state.currentMapping.unitCol
+      : -1;
     const newMapping = {
       nameCol: -1,
       stockCol: -1,
-      codeCol: -1
+      codeCol: -1,
+      unitCol: existingUnitCol,
+      isManual: true
     };
 
     selects.forEach(sel => {
@@ -1684,8 +1785,16 @@
       return;
     }
 
-    state.currentMapping = newMapping;
     state.currentHeaderRowIndex = parseInt(dom.headerRowSelector.value, 10);
+    if (newMapping.unitCol < 0 && state.currentSheetData && state.currentSheetData[state.currentHeaderRowIndex]) {
+      const prevRow = state.currentHeaderRowIndex > 0 ? state.currentSheetData[state.currentHeaderRowIndex - 1] : null;
+      const autoDetected = window.ExcelParser.detectColumns(state.currentSheetData[state.currentHeaderRowIndex], prevRow);
+      if (autoDetected && autoDetected.unitCol >= 0 && ![newMapping.nameCol, newMapping.stockCol, newMapping.codeCol].includes(autoDetected.unitCol)) {
+        newMapping.unitCol = autoDetected.unitCol;
+      }
+    }
+
+    state.currentMapping = newMapping;
 
     // Сохраняем маппинг в профиле поставщика в IndexedDB
     const activeSup = state.suppliers.find(s => s.id === state.activeSupplierId);
@@ -1840,12 +1949,29 @@
     const { url, token } = window.PriceStorage.getCloudConfig();
     if (!url || !token) return;
 
+    // Троттлинг фоновой синхронизации (не чаще раза в 10 секунд, если не force)
+    if (!force && window.PriceStorage.lastSyncAt && (Date.now() - window.PriceStorage.lastSyncAt < 10000)) {
+      return;
+    }
+
     try {
       const res = await window.PriceStorage.syncFromCloud(force);
+      if (res.skipped) return;
       if (res.hasUpdates) {
         state.suppliers = await window.PriceStorage.getAllSuppliers();
         renderSupplierTabs();
-        await loadActiveSupplierSnapshot();
+
+        // Если у пользователя открыт свежий незафиксированный файл — обновляем только эталон,
+        // не сбрасывая выбранный файл и не блокируя кнопку фиксации
+        if (state.parsedItems.length > 0) {
+          state.baselineSnapshot = await window.PriceStorage.getSnapshotRecord(state.activeSupplierId);
+          updateBaselineInfo();
+          updateRollbackButtonState();
+          recomputeDiff();
+          renderTable();
+        } else {
+          await loadActiveSupplierSnapshot();
+        }
         showToast('Облачные остатки синхронизированы', 'success');
       }
     } catch (e) {
@@ -2248,8 +2374,14 @@
     dom.btnSaveSupplier.addEventListener('click', saveSupplierFromModal);
 
     // Drag & Drop
-    dom.dropzone.addEventListener('click', () => dom.fileInput.click());
-    dom.btnChangeFile.addEventListener('click', () => dom.fileInput.click());
+    dom.dropzone.addEventListener('click', () => {
+      state.lastFilePickerOpenedAt = Date.now();
+      dom.fileInput.click();
+    });
+    dom.btnChangeFile.addEventListener('click', () => {
+      state.lastFilePickerOpenedAt = Date.now();
+      dom.fileInput.click();
+    });
 
     dom.fileInput.addEventListener('change', (e) => {
       if (e.target.files && e.target.files[0]) {
@@ -2383,12 +2515,16 @@
     // Синхронизация при возвращении на вкладку (переключение между браузером и другими окнами/приложениями)
     window.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && window.PriceStorage.hasAuthenticatedPin()) {
+        // Не дергаем фоновую синхронизацию сразу после закрытия системного диалога выбора файла
+        if (Date.now() - state.lastFilePickerOpenedAt < 10000) return;
         backgroundCloudSync();
       }
     });
 
     window.addEventListener('focus', () => {
       if (window.PriceStorage.hasAuthenticatedPin()) {
+        // При закрытии окна выбора файла браузер получает focus ровно в момент события change у fileInput
+        if (Date.now() - state.lastFilePickerOpenedAt < 10000) return;
         backgroundCloudSync();
       }
     });
